@@ -1,7 +1,51 @@
 import yt_dlp
 import os
 import uuid
+import re
+from urllib.parse import urlparse, parse_qs
 from .config import YOUTUBE_DOWNLOAD_FORMAT
+
+def extract_start_time_from_url(url: str) -> int:
+    """
+    YouTube URLからt=パラメータを抽出して秒数を返す
+    例: t=120, t=2m30s, t=1h2m3s
+    
+    Args:
+        url: YouTube URL
+        
+    Returns:
+        開始時刻（秒）、パラメータがない場合は0
+    """
+    try:
+        # クエリパラメータから t= を取得
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        
+        if 't' in params:
+            t_value = params['t'][0]
+            
+            # 数値のみの場合（秒）
+            if t_value.isdigit():
+                return int(t_value)
+            
+            # h/m/s形式の場合
+            hours = re.search(r'(\d+)h', t_value)
+            minutes = re.search(r'(\d+)m', t_value)
+            seconds = re.search(r'(\d+)s', t_value)
+            
+            total_seconds = 0
+            if hours:
+                total_seconds += int(hours.group(1)) * 3600
+            if minutes:
+                total_seconds += int(minutes.group(1)) * 60
+            if seconds:
+                total_seconds += int(seconds.group(1))
+            
+            return total_seconds
+    except Exception as e:
+        print(f"Error extracting start time from URL: {e}")
+    
+    return 0
 
 def download_youtube_video(url: str, output_dir: str) -> dict:
     """
@@ -61,7 +105,8 @@ def download_youtube_video(url: str, output_dir: str) -> dict:
                 "duration": info.get('duration', 0),
                 "thumbnail": info.get('thumbnail', ''),
                 "id": info.get('id', ''),
-                "filename": os.path.basename(filename)
+                "filename": os.path.basename(filename),
+                "start_time": extract_start_time_from_url(url)
             }
 
     except yt_dlp.utils.DownloadError as e:

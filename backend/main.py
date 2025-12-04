@@ -175,7 +175,8 @@ async def download_youtube(request: YouTubeDownloadRequest):
             "srt_url": f"/static/{os.path.basename(srt_path)}",
             "fcpxml_url": f"/static/{fcpxml_filename}",
             "filename": os.path.basename(video_path),
-            "video_info": video_info
+            "video_info": video_info,
+            "start_time": video_info.get("start_time", 0)
         }
     except Exception as e:
         print(f"Error downloading YouTube video: {e}")
@@ -185,6 +186,7 @@ class AnalyzeRequest(BaseModel):
     vtt_filename: str
     max_clips: int = DEFAULT_MAX_CLIPS
     offset: int = 0  # Starting segment index
+    start_time: float = 0  # 解析開始時刻（秒）
 
 @app.post("/youtube/analyze")
 async def analyze_video(request: AnalyzeRequest):
@@ -269,8 +271,19 @@ async def analyze_video(request: AnalyzeRequest):
         if not video_path:
             raise HTTPException(status_code=404, detail="Video file not found")
 
+        # Filter segments by start_time if specified
+        if request.start_time > 0:
+            segments_chunk = [
+                seg for seg in segments_chunk
+                if seg['start'] >= request.start_time
+            ]
+            print(f"Filtered to {len(segments_chunk)} segments after start_time={request.start_time}s")
+        
+        if not segments_chunk:
+            raise HTTPException(status_code=400, detail=f"No segments found after start_time={request.start_time}s")
+
         # Analyze with hybrid detection (silence + sentence boundaries)
-        clips = detect_boundaries_hybrid(video_path, segments_chunk, request.max_clips)
+        clips = detect_boundaries_hybrid(video_path, segments_chunk, request.max_clips, request.start_time)
 
         # Automatically evaluate each clip
         print(f"Evaluating {len(clips)} clips...")

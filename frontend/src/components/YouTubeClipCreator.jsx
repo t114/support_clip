@@ -17,6 +17,47 @@ function YouTubeClipCreator() {
     const [totalSegments, setTotalSegments] = useState(0);
     const [analyzedSegments, setAnalyzedSegments] = useState(0);
     const [creatingClipId, setCreatingClipId] = useState(null);
+    const [startTime, setStartTime] = useState(0);
+
+    // YouTube URLからt=パラメータを抽出
+    const extractStartTimeFromUrl = (url) => {
+        try {
+            const urlObj = new URL(url);
+            const t = urlObj.searchParams.get('t');
+
+            if (!t) return 0;
+
+            // 数値のみの場合（秒）
+            if (/^\d+$/.test(t)) {
+                return parseInt(t);
+            }
+
+            // h/m/s形式の場合
+            const hours = t.match(/(\d+)h/);
+            const minutes = t.match(/(\d+)m/);
+            const seconds = t.match(/(\d+)s/);
+
+            let totalSeconds = 0;
+            if (hours) totalSeconds += parseInt(hours[1]) * 3600;
+            if (minutes) totalSeconds += parseInt(minutes[1]) * 60;
+            if (seconds) totalSeconds += parseInt(seconds[1]);
+
+            return totalSeconds;
+        } catch (e) {
+            return 0;
+        }
+    };
+
+    const handleUrlChange = (e) => {
+        const newUrl = e.target.value;
+        setUrl(newUrl);
+
+        // t=パラメータを自動抽出
+        const extractedTime = extractStartTimeFromUrl(newUrl);
+        if (extractedTime > 0) {
+            setStartTime(extractedTime);
+        }
+    };
 
     const handleDownload = async () => {
         if (!url) return;
@@ -43,6 +84,12 @@ function YouTubeClipCreator() {
             setSrtUrl(data.srt_url);
             setFcpxmlUrl(data.fcpxml_url);
             setVttFilename(data.subtitle_url.split('/').pop()); // Extract filename
+
+            // バックエンドから返されたstart_timeを使用（URLから抽出済み）
+            if (data.start_time !== undefined && data.start_time > 0) {
+                setStartTime(data.start_time);
+            }
+
             setStatus('analyzing');
             setMessage('AIが動画を分析して切り抜き箇所を探しています...');
 
@@ -72,7 +119,8 @@ function YouTubeClipCreator() {
                 body: JSON.stringify({
                     vtt_filename: vttFile,
                     max_clips: 5,
-                    offset: offset
+                    offset: offset,
+                    start_time: startTime
                 })
             });
 
@@ -178,7 +226,7 @@ function YouTubeClipCreator() {
                     <input
                         type="text"
                         value={url}
-                        onChange={(e) => setUrl(e.target.value)}
+                        onChange={handleUrlChange}
                         placeholder="YouTube URLを入力 (例: https://www.youtube.com/watch?v=...)"
                         className="flex-1 rounded-md border-gray-300 border p-2"
                         disabled={status === 'downloading' || status === 'analyzing'}
@@ -190,6 +238,51 @@ function YouTubeClipCreator() {
                     >
                         {status === 'downloading' ? 'ダウンロード中...' : '開始'}
                     </button>
+                </div>
+
+                <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-md border border-gray-200">
+                    <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                        解析開始位置:
+                    </label>
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="number"
+                            value={Math.floor(startTime / 60)}
+                            onChange={(e) => {
+                                const minutes = parseInt(e.target.value) || 0;
+                                const seconds = startTime % 60;
+                                setStartTime(Math.max(0, minutes * 60 + seconds));
+                            }}
+                            min="0"
+                            className="w-16 rounded-md border-gray-300 border p-2 text-sm"
+                            disabled={status === 'downloading' || status === 'analyzing'}
+                            placeholder="0"
+                        />
+                        <span className="text-sm text-gray-600">分</span>
+                        <input
+                            type="number"
+                            value={startTime % 60}
+                            onChange={(e) => {
+                                const minutes = Math.floor(startTime / 60);
+                                const seconds = parseInt(e.target.value) || 0;
+                                setStartTime(Math.max(0, minutes * 60 + Math.min(59, seconds)));
+                            }}
+                            min="0"
+                            max="59"
+                            className="w-16 rounded-md border-gray-300 border p-2 text-sm"
+                            disabled={status === 'downloading' || status === 'analyzing'}
+                            placeholder="0"
+                        />
+                        <span className="text-sm text-gray-600">秒</span>
+                    </div>
+                    {startTime > 0 && (
+                        <span className="text-sm text-blue-600 font-medium">
+                            (合計: {startTime}秒)
+                        </span>
+                    )}
+                    <span className="text-xs text-gray-500 ml-auto">
+                        OP/イントロをスキップする場合に設定
+                    </span>
                 </div>
 
                 {message && (

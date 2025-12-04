@@ -135,7 +135,7 @@ def detect_sentence_boundaries(segments: list) -> list:
 
     return boundaries
 
-def detect_boundaries_hybrid(video_path: str, segments: list, max_clips: int = 5) -> list:
+def detect_boundaries_hybrid(video_path: str, segments: list, max_clips: int = 5, start_time: float = 0) -> list:
     """
     ハイブリッド方式：無音区間 + 文章区切り + 時間制約を組み合わせて境界を検出
 
@@ -143,16 +143,31 @@ def detect_boundaries_hybrid(video_path: str, segments: list, max_clips: int = 5
         video_path: 動画ファイルのパス
         segments: Whisperの文字起こしセグメント
         max_clips: 目標クリップ数
+        start_time: 解析開始時刻（秒）
 
     Returns:
         境界の時刻リスト（秒）
     """
-    sys.stderr.write(f"[HYBRID_DETECTOR] Starting hybrid boundary detection...\n")
+    sys.stderr.write(f"[HYBRID_DETECTOR] Starting hybrid boundary detection (start_time={start_time}s)...\n")
     sys.stderr.flush()
 
     # 動画の長さを取得
     if not segments:
         return []
+
+    # start_time以降のセグメントのみをフィルタリング
+    if start_time > 0:
+        filtered_segments = [
+            seg for seg in segments
+            if (seg.start if hasattr(seg, 'start') else seg['start']) >= start_time
+        ]
+        if not filtered_segments:
+            sys.stderr.write(f"[HYBRID_DETECTOR] No segments found after start_time={start_time}s\n")
+            sys.stderr.flush()
+            return []
+        segments = filtered_segments
+        sys.stderr.write(f"[HYBRID_DETECTOR] Filtered to {len(segments)} segments after start_time={start_time}s\n")
+        sys.stderr.flush()
 
     first_time = segments[0].start if hasattr(segments[0], 'start') else segments[0]['start']
     last_time = segments[-1].end if hasattr(segments[-1], 'end') else segments[-1]['end']
@@ -244,10 +259,29 @@ def detect_boundaries_hybrid(video_path: str, segments: list, max_clips: int = 5
 
     return clips
 
-def analyze_transcript_with_ai(segments: list, max_clips: int = 5) -> list:
+def analyze_transcript_with_ai(segments: list, max_clips: int = 5, start_time: float = 0) -> list:
     """
     Analyzes transcript segments using Ollama to identify interesting clips.
+    
+    Args:
+        segments: 文字起こしセグメント
+        max_clips: 最大クリップ数
+        start_time: 解析開始時刻（秒）
     """
+
+    # start_time以降のセグメントのみをフィルタリング
+    if start_time > 0:
+        filtered_segments = [
+            seg for seg in segments
+            if (seg.start if hasattr(seg, 'start') else seg['start']) >= start_time
+        ]
+        
+        if not filtered_segments:
+            print(f"Warning: No segments found after start_time={start_time}s")
+            return []
+        
+        segments = filtered_segments
+        print(f"Filtered to {len(segments)} segments after start_time={start_time}s")
 
     # If transcript chunk is still too long, sample segments to stay within context limits
     # Ollama llama3.2 has a 4096 token context limit
