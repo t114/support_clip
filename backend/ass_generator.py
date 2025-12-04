@@ -41,50 +41,68 @@ def seconds_to_ass_time(seconds):
     s = seconds % 60
     return f"{h}:{m:02d}:{s:05.2f}"
 
-def generate_ass(vtt_path, styles, output_path):
+def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=None):
     """
     Generate an ASS file from VTT and styles.
-    Supports:
-    - Background box
-    - Inner outline
-    - Outer outline (double outline)
-    - Shadow
+    Supports multiple styles and per-line style mapping.
     """
     
-    # Parse Styles
-    # Apply 1.5x multiplier as requested by user to match preview appearance
-    font_size = int(styles.get('fontSize', 24) * 1.5)
-    font_family = styles.get('fontFamily', 'Noto Sans JP')
-    font_weight = styles.get('fontWeight', 'normal')
-    
-    # Map frontend fonts to installed system fonts
-    font_mapping = {
-        'Noto Sans JP': 'Noto Sans CJK JP',
-        'Klee One': 'Noto Serif CJK JP', # Fallback for handwriting
-        'Dela Gothic One': 'Noto Sans CJK JP Black', # Fallback for heavy
-        'Kilgo U': 'Noto Sans CJK JP' # Fallback
-    }
-    
-    ass_font_family = font_mapping.get(font_family, 'Noto Sans CJK JP')
-    
-    bold = -1 if font_weight == 'bold' else 0
-    
-    primary_color = hex_to_ass_color(styles.get('color', '#ffffff'))
-    back_color = hex_to_ass_color(styles.get('backgroundColor', '#00000080'))
-    outline_color = hex_to_ass_color(styles.get('outlineColor', '#000000'))
-    outline_width = int(styles.get('outlineWidth', 0) * 1.5)
-    
-    # New: Outer outline and shadow
-    outer_outline_color = hex_to_ass_color(styles.get('outerOutlineColor', '#ffffff'))
-    outer_outline_width = int(styles.get('outerOutlineWidth', 0) * 1.5)
-    shadow_color = hex_to_ass_color(styles.get('shadowColor', '#000000'))
-    shadow_blur = int(styles.get('shadowBlur', 0) * 1.5)
-    shadow_offset_x = int(styles.get('shadowOffsetX', 0) * 1.5)
-    shadow_offset_y = int(styles.get('shadowOffsetY', 0) * 1.5)
-    
-    # MarginV calculation (approximate)
-    margin_v = int(styles.get('bottom', 10) * 7)
-    
+    # Helper to generate style definition string
+    def create_style_def(name, style_obj):
+        # Apply 1.5x multiplier as requested by user to match preview appearance
+        font_size = int(style_obj.get('fontSize', 24) * 1.5)
+        font_family = style_obj.get('fontFamily', 'Noto Sans JP')
+        font_weight = style_obj.get('fontWeight', 'normal')
+        
+        # Map frontend fonts to installed system fonts
+        font_mapping = {
+            'Noto Sans JP': 'Noto Sans CJK JP',
+            'Klee One': 'Noto Serif CJK JP', # Fallback for handwriting
+            'Dela Gothic One': 'Noto Sans CJK JP Black', # Fallback for heavy
+            'Kilgo U': 'Noto Sans CJK JP' # Fallback
+        }
+        
+        ass_font_family = font_mapping.get(font_family, 'Noto Sans CJK JP')
+        
+        bold = -1 if font_weight == 'bold' else 0
+        
+        primary_color = hex_to_ass_color(style_obj.get('color', '#ffffff'))
+        back_color = hex_to_ass_color(style_obj.get('backgroundColor', '#00000080'))
+        outline_color = hex_to_ass_color(style_obj.get('outlineColor', '#000000'))
+        outline_width = int(style_obj.get('outlineWidth', 0) * 1.5)
+        
+        # New: Outer outline and shadow
+        outer_outline_color = hex_to_ass_color(style_obj.get('outerOutlineColor', '#ffffff'))
+        outer_outline_width = int(style_obj.get('outerOutlineWidth', 0) * 1.5)
+        shadow_color = hex_to_ass_color(style_obj.get('shadowColor', '#000000'))
+        shadow_blur = int(style_obj.get('shadowBlur', 0) * 1.5)
+        # shadow_offset_x = int(style_obj.get('shadowOffsetX', 0) * 1.5) # Not used in standard ASS Style format directly
+        # shadow_offset_y = int(style_obj.get('shadowOffsetY', 0) * 1.5)
+        
+        # MarginV calculation (approximate)
+        margin_v = int(style_obj.get('bottom', 10) * 7)
+        
+        # Calculate total outline width for outer layer
+        total_outline = outline_width + outer_outline_width
+        
+        definitions = []
+        
+        # Style 1: Background Box (Layer 0)
+        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{outline_width},0,2,10,10,{margin_v},1")
+        
+        # Style 2: Outer Outline (Layer 1)
+        if outer_outline_width > 0:
+            definitions.append(f"Style: {name}_Outer,{ass_font_family},{font_size},{outer_outline_color},&H00000000,{outer_outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{total_outline},{shadow_blur},2,10,10,{margin_v},1")
+        
+        # Style 3: Inner Outline (Layer 2)
+        shadow_value = shadow_blur if outer_outline_width == 0 else 0
+        definitions.append(f"Style: {name}_Inner,{ass_font_family},{font_size},{primary_color},&H00000000,{outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{outline_width},{shadow_value},2,10,10,{margin_v},1")
+        
+        # Style 4: Text (Layer 3)
+        definitions.append(f"Style: {name}_Text,{ass_font_family},{font_size},{primary_color},&H00000000,&H00000000,&H00000000,{bold},0,0,0,100,100,0,0,1,0,0,2,10,10,{margin_v},1")
+        
+        return definitions, outer_outline_width > 0
+
     # Parse VTT
     events = []
     with open(vtt_path, 'r', encoding='utf-8') as f:
@@ -104,7 +122,6 @@ def generate_ass(vtt_path, styles, output_path):
             in_cue = True
             text_lines = []
         elif stripped and in_cue and "WEBVTT" not in stripped:
-            # Skip cue numbers
             if stripped.isdigit() and not text_lines: 
                 continue
             text_lines.append(stripped)
@@ -118,7 +135,6 @@ def generate_ass(vtt_path, styles, output_path):
                 })
             in_cue = False
             
-    # Handle last cue
     if in_cue and text_lines:
         text = "\\N".join(text_lines)
         events.append({
@@ -141,45 +157,55 @@ def generate_ass(vtt_path, styles, output_path):
     ass_lines.append("[V4+ Styles]")
     ass_lines.append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding")
     
-    # Calculate total outline width for outer layer
-    total_outline = outline_width + outer_outline_width
+    # Default Style
+    default_defs, default_has_outer = create_style_def("Default", styles)
+    ass_lines.extend(default_defs)
     
-    # Style 1: Background Box (Layer 0) - only if background is visible
-    ass_lines.append(f"Style: BoxStyle,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{outline_width},0,2,10,10,{margin_v},1")
-    
-    # Style 2: Outer Outline (Layer 1) - only if outer outline is enabled
-    if outer_outline_width > 0:
-        ass_lines.append(f"Style: OuterOutline,{ass_font_family},{font_size},{outer_outline_color},&H00000000,{outer_outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{total_outline},{shadow_blur},2,10,10,{margin_v},1")
-    
-    # Style 3: Inner Outline (Layer 2)
-    # If we have shadow but no outer outline, apply shadow here
-    shadow_value = shadow_blur if outer_outline_width == 0 else 0
-    ass_lines.append(f"Style: InnerOutline,{ass_font_family},{font_size},{primary_color},&H00000000,{outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{outline_width},{shadow_value},2,10,10,{margin_v},1")
-    
-    # Style 4: Text (Layer 3) - final text layer without outline
-    ass_lines.append(f"Style: TextStyle,{ass_font_family},{font_size},{primary_color},&H00000000,&H00000000,&H00000000,{bold},0,0,0,100,100,0,0,1,0,0,2,10,10,{margin_v},1")
-    
+    # Saved Styles
+    saved_style_has_outer = {}
+    if saved_styles:
+        for name, style_obj in saved_styles.items():
+            # Sanitize name for ASS (remove spaces, commas)
+            safe_name = name.replace(" ", "_").replace(",", "")
+            defs, has_outer = create_style_def(safe_name, style_obj)
+            ass_lines.extend(defs)
+            saved_style_has_outer[safe_name] = has_outer
+            
     ass_lines.append("")
     
     # Events
     ass_lines.append("[Events]")
     ass_lines.append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
     
-    for event in events:
-        # Layer 0: Box (only if background is visible)
-        bg_alpha = int(back_color[2:4], 16)
-        if bg_alpha < 255:
-            ass_lines.append(f"Dialogue: 0,{event['start']},{event['end']},BoxStyle,,0,0,0,,{event['text']}")
+    for i, event in enumerate(events):
+        # Determine style for this event
+        style_name = "Default"
+        has_outer = default_has_outer
         
-        # Layer 1: Outer Outline (only if enabled)
-        if outer_outline_width > 0:
-            ass_lines.append(f"Dialogue: 1,{event['start']},{event['end']},OuterOutline,,0,0,0,,{event['text']}")
+        # Check style map (index is string in JSON keys usually)
+        if style_map and str(i) in style_map:
+            mapped_name = style_map[str(i)]
+            safe_mapped_name = mapped_name.replace(" ", "_").replace(",", "")
+            # Verify style exists in saved_styles
+            if saved_styles and mapped_name in saved_styles:
+                style_name = safe_mapped_name
+                has_outer = saved_style_has_outer.get(safe_mapped_name, False)
+        
+        # Layer 0: Box
+        # Check background alpha from style object
+        # We need to look up the style object again or parse from generated line...
+        # Simpler: assume box is always generated but visibility depends on alpha in style def
+        ass_lines.append(f"Dialogue: 0,{event['start']},{event['end']},{style_name}_Box,,0,0,0,,{event['text']}")
+        
+        # Layer 1: Outer Outline
+        if has_outer:
+            ass_lines.append(f"Dialogue: 1,{event['start']},{event['end']},{style_name}_Outer,,0,0,0,,{event['text']}")
         
         # Layer 2: Inner Outline
-        ass_lines.append(f"Dialogue: 2,{event['start']},{event['end']},InnerOutline,,0,0,0,,{event['text']}")
+        ass_lines.append(f"Dialogue: 2,{event['start']},{event['end']},{style_name}_Inner,,0,0,0,,{event['text']}")
         
         # Layer 3: Text
-        ass_lines.append(f"Dialogue: 3,{event['start']},{event['end']},TextStyle,,0,0,0,,{event['text']}")
+        ass_lines.append(f"Dialogue: 3,{event['start']},{event['end']},{style_name}_Text,,0,0,0,,{event['text']}")
         
     # Write to file
     with open(output_path, 'w', encoding='utf-8') as f:

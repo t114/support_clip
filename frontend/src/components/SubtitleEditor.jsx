@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { generateUUID } from '../utils/vtt';
 
-export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTime, onSeek, onPause }) {
+export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTime, onSeek, onPause, savedStyles }) {
     const activeIndex = subtitles.findIndex(
         sub => currentTime >= sub.start && currentTime <= sub.end
     );
@@ -120,7 +120,22 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                         />
 
                         {/* Action Buttons */}
-                        <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity items-center">
+                            {/* Style Selector */}
+                            {savedStyles && Object.keys(savedStyles).length > 0 && (
+                                <select
+                                    value={sub.styleName || ''}
+                                    onChange={(e) => handleChange(index, 'styleName', e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-xs border border-gray-300 rounded px-1 py-0.5 mr-2 max-w-[100px]"
+                                >
+                                    <option value="">デフォルト</option>
+                                    {Object.keys(savedStyles).map(name => (
+                                        <option key={name} value={name}>{name}</option>
+                                    ))}
+                                </select>
+                            )}
+
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();

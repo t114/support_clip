@@ -1,15 +1,9 @@
 import React, { useRef, useEffect } from 'react';
 
-export default function VideoPlayer({ videoUrl, subtitles, styles, onTimeUpdate }) {
+export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, onTimeUpdate }) {
     const videoRef = useRef(null);
 
-    // Find current subtitle based on local state passed from parent
-    // Note: In a real optimized app, we might want to throttle this or handle it differently
-    // but for now, finding it on render or passing current time is fine.
-    // Actually, let's rely on the parent passing the active subtitle text or we find it here.
-    // Let's find it here for the overlay to keep it synced with the video frame as much as possible.
-
-    const [currentText, setCurrentText] = React.useState('');
+    const [activeSub, setActiveSub] = React.useState(null);
     const [scale, setScale] = React.useState(1); // Scale factor relative to 1080p
 
     const handleTimeUpdate = () => {
@@ -17,10 +11,15 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, onTimeUpdate 
             const time = videoRef.current.currentTime;
             onTimeUpdate(time);
 
-            const activeSub = subtitles.find(sub => time >= sub.start && time <= sub.end);
-            setCurrentText(activeSub ? activeSub.text : '');
+            const sub = subtitles.find(sub => time >= sub.start && time <= sub.end);
+            setActiveSub(sub || null);
         }
     };
+
+    // Determine current style to use
+    const currentStyle = (activeSub && activeSub.styleName && savedStyles && savedStyles[activeSub.styleName])
+        ? savedStyles[activeSub.styleName]
+        : styles;
 
     // Helper to check if background is transparent
     const isTransparent = (color) => {
@@ -32,7 +31,14 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, onTimeUpdate 
         return false; // Assume opaque if #RRGGBB
     };
 
-    const hasBackground = !isTransparent(styles.backgroundColor);
+    // Update activeSub when subtitles change (e.g. text edit or style change) while paused
+    useEffect(() => {
+        if (videoRef.current) {
+            const time = videoRef.current.currentTime;
+            const sub = subtitles.find(sub => time >= sub.start && time <= sub.end);
+            setActiveSub(sub || null);
+        }
+    }, [subtitles]);
 
     useEffect(() => {
         if (videoRef.current) {
@@ -72,8 +78,8 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, onTimeUpdate 
         const shadows = [];
 
         // Inner outline (using text-shadow to create outline effect)
-        const innerWidth = (styles.outlineWidth || 0) * scale;
-        const innerColor = styles.outlineColor || '#000000';
+        const innerWidth = (currentStyle.outlineWidth || 0) * scale;
+        const innerColor = currentStyle.outlineColor || '#000000';
         if (innerWidth > 0) {
             // Create outline using multiple shadows
             for (let angle = 0; angle < 360; angle += 45) {
@@ -85,8 +91,8 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, onTimeUpdate 
         }
 
         // Outer outline
-        const outerWidth = (styles.outerOutlineWidth || 0) * scale;
-        const outerColor = styles.outerOutlineColor || '#FFFFFF';
+        const outerWidth = (currentStyle.outerOutlineWidth || 0) * scale;
+        const outerColor = currentStyle.outerOutlineColor || '#FFFFFF';
         if (outerWidth > 0) {
             const totalWidth = innerWidth + outerWidth;
             for (let angle = 0; angle < 360; angle += 45) {
@@ -98,10 +104,10 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, onTimeUpdate 
         }
 
         // Drop shadow
-        const shadowBlur = (styles.shadowBlur || 0) * scale;
-        const shadowX = (styles.shadowOffsetX || 0) * scale;
-        const shadowY = (styles.shadowOffsetY || 0) * scale;
-        const shadowColor = styles.shadowColor || '#000000';
+        const shadowBlur = (currentStyle.shadowBlur || 0) * scale;
+        const shadowX = (currentStyle.shadowOffsetX || 0) * scale;
+        const shadowY = (currentStyle.shadowOffsetY || 0) * scale;
+        const shadowColor = currentStyle.shadowColor || '#000000';
         if (shadowBlur > 0 || shadowX !== 0 || shadowY !== 0) {
             shadows.push(`${shadowX}px ${shadowY}px ${shadowBlur}px ${shadowColor}`);
         }
@@ -123,27 +129,27 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, onTimeUpdate 
             </video>
 
             {/* Custom Subtitle Overlay */}
-            {currentText && (
+            {activeSub && (
                 <div
                     className="absolute left-0 right-0 text-center pointer-events-none transition-all duration-200"
                     style={{
-                        bottom: `${styles.bottom}%`,
+                        bottom: `${currentStyle.bottom}%`,
                     }}
                 >
                     <span
                         style={{
-                            fontFamily: styles.fontFamily || 'Noto Sans JP',
-                            fontSize: `${styles.fontSize * scale}px`,
-                            color: styles.color,
-                            backgroundColor: styles.backgroundColor,
+                            fontFamily: currentStyle.fontFamily || 'Noto Sans JP',
+                            fontSize: `${currentStyle.fontSize * scale}px`,
+                            color: currentStyle.color,
+                            backgroundColor: currentStyle.backgroundColor,
                             textShadow: buildTextShadow(),
-                            fontWeight: styles.fontWeight || 'normal',
+                            fontWeight: currentStyle.fontWeight || 'normal',
                             padding: `${4 * scale}px ${12 * scale}px`,
                             borderRadius: `${4 * scale}px`,
                             whiteSpace: 'pre-wrap',
                         }}
                     >
-                        {currentText}
+                        {activeSub.text}
                     </span>
                 </div>
             )}

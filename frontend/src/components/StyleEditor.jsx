@@ -1,8 +1,17 @@
 import React from 'react';
 
-export default function StyleEditor({ styles, onStyleChange }) {
+export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave, onLoad, onDelete }) {
+    const [styleName, setStyleName] = React.useState('');
+
     const handleChange = (key, value) => {
         onStyleChange({ ...styles, [key]: value });
+    };
+
+    const handleSave = () => {
+        if (styleName.trim()) {
+            onSave(styleName.trim(), styles);
+            setStyleName('');
+        }
     };
 
     // Helper to get hex and alpha from #RRGGBBAA
@@ -31,6 +40,53 @@ export default function StyleEditor({ styles, onStyleChange }) {
     return (
         <div className="bg-white p-4 rounded-lg shadow space-y-4">
             <h3 className="font-bold text-gray-700">字幕スタイル</h3>
+
+            {/* スタイル保存・読み込み */}
+            <div className="bg-gray-50 p-3 rounded border border-gray-200 mb-4">
+                <div className="flex gap-2 mb-2">
+                    <input
+                        type="text"
+                        value={styleName}
+                        onChange={(e) => setStyleName(e.target.value)}
+                        placeholder="スタイル名を入力"
+                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
+                    />
+                    <button
+                        onClick={handleSave}
+                        disabled={!styleName.trim()}
+                        className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 disabled:bg-gray-300"
+                    >
+                        {savedStyles && savedStyles[styleName] ? '更新' : '保存'}
+                    </button>
+                </div>
+
+                {savedStyles && Object.keys(savedStyles).length > 0 && (
+                    <div className="space-y-2">
+                        <label className="block text-xs text-gray-600">保存済みスタイル:</label>
+                        <div className="flex flex-wrap gap-2">
+                            {Object.keys(savedStyles).map(name => (
+                                <div key={name} className="flex items-center bg-white border border-gray-300 rounded px-2 py-1 text-sm">
+                                    <span
+                                        className="cursor-pointer hover:text-blue-600 mr-2"
+                                        onClick={() => {
+                                            onLoad(name);
+                                            setStyleName(name);
+                                        }}
+                                    >
+                                        {name}
+                                    </span>
+                                    <button
+                                        onClick={() => onDelete(name)}
+                                        className="text-red-500 hover:text-red-700 text-xs"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
                 <div>

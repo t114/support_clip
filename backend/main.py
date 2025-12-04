@@ -80,44 +80,52 @@ async def upload_video(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 from pydantic import BaseModel
-from typing import Dict, Any
-from .video_processing import burn_subtitles
+from typing import Dict, Any, Optional
+from .video_processing import burn_subtitles_with_ffmpeg
+from .ass_generator import generate_ass
 
 class BurnRequest(BaseModel):
     video_filename: str
     subtitle_content: str
-    styles: Dict[str, Any]
+    styles: dict
+    saved_styles: Optional[dict] = None
+    style_map: Optional[dict] = None
 
 @app.post("/burn")
-async def burn_video(request: BurnRequest):
+async def burn_subtitles(request: BurnRequest):
     try:
-        # Validate video exists
+        # Find video file
         video_path = os.path.join(UPLOAD_DIR, request.video_filename)
         if not os.path.exists(video_path):
             raise HTTPException(status_code=404, detail="Video not found")
             
-        # Save modified VTT
+        # Save temporary VTT
         base_name = os.path.splitext(request.video_filename)[0]
-        vtt_filename = f"{base_name}_modified.vtt"
-        vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
-        
+        vtt_path = os.path.join(UPLOAD_DIR, f"{base_name}_modified.vtt")
         with open(vtt_path, "w", encoding="utf-8") as f:
             f.write(request.subtitle_content)
             
-        # Output filename
+        # Generate ASS file with styles
+        ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_modified.ass")
+        generate_ass(
+            vtt_path, 
+            request.styles, 
+            ass_path,
+            saved_styles=request.saved_styles,
+            style_map=request.style_map
+        )
+        
+        # Burn subtitles
         output_filename = f"{base_name}_burned.mp4"
         output_path = os.path.join(UPLOAD_DIR, output_filename)
         
-        # Burn subtitles
-        burn_subtitles(video_path, vtt_path, output_path, request.styles)
+        burn_subtitles_with_ffmpeg(video_path, ass_path, output_path)
         
-        return {
-            "video_url": f"/static/{output_filename}",
-            "filename": output_filename
-        }
-        
+        return {"filename": output_filename}
     except Exception as e:
         print(f"Error burning subtitles: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 from fastapi.responses import FileResponse

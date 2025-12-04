@@ -1,6 +1,6 @@
 import subprocess
 import os
-from .ass_generator import generate_ass
+
 
 def hex_to_ass_color(hex_color, alpha=0):
     """
@@ -31,15 +31,10 @@ def hex_to_ass_color(hex_color, alpha=0):
         
     return f"&H{a:02X}{b:02X}{g:02X}{r:02X}"
 
-def burn_subtitles(video_path, vtt_path, output_path, styles):
+def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path):
     """
-    Burn subtitles into video using ffmpeg with specified styles.
+    Burn subtitles into video using ffmpeg with specified ASS file.
     """
-    
-    # Generate ASS file
-    ass_filename = os.path.splitext(os.path.basename(vtt_path))[0] + ".ass"
-    ass_path = os.path.join(os.path.dirname(vtt_path), ass_filename)
-    generate_ass(vtt_path, styles, ass_path)
     
     # Escape path for ffmpeg
     # subtitles filter needs escaped path: \: and \\
@@ -55,10 +50,9 @@ def burn_subtitles(video_path, vtt_path, output_path, styles):
     ]
     
     print(f"Running ffmpeg: {' '.join(cmd)}")
-    print(f"Running ffmpeg: {' '.join(cmd)}")
+    
     # Capture output to prevent Broken Pipe
     result = subprocess.run(cmd, capture_output=True, text=True)
-    
     
     if result.returncode != 0:
         print(f"FFmpeg burn error output:\n{result.stderr}")

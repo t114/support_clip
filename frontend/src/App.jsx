@@ -28,6 +28,40 @@ function App() {
     fontWeight: 'normal',
   });
 
+  // Saved Styles State
+  const [savedStyles, setSavedStyles] = useState({});
+
+  // Load saved styles from localStorage on mount
+  useEffect(() => {
+    const loaded = localStorage.getItem('savedStyles');
+    if (loaded) {
+      try {
+        setSavedStyles(JSON.parse(loaded));
+      } catch (e) {
+        console.error('Failed to parse saved styles', e);
+      }
+    }
+  }, []);
+
+  const handleSaveStyle = (name, styleObj) => {
+    const newSavedStyles = { ...savedStyles, [name]: styleObj };
+    setSavedStyles(newSavedStyles);
+    localStorage.setItem('savedStyles', JSON.stringify(newSavedStyles));
+  };
+
+  const handleLoadStyle = (name) => {
+    if (savedStyles[name]) {
+      setStyles(savedStyles[name]);
+    }
+  };
+
+  const handleDeleteStyle = (name) => {
+    const newSavedStyles = { ...savedStyles };
+    delete newSavedStyles[name];
+    setSavedStyles(newSavedStyles);
+    localStorage.setItem('savedStyles', JSON.stringify(newSavedStyles));
+  };
+
   const handleUploadStart = () => {
     setStatus('uploading');
     setErrorMessage('');
@@ -72,7 +106,14 @@ function App() {
         body: JSON.stringify({
           video_filename: videoData.unique_filename,
           subtitle_content: vttContent,
-          styles: styles
+          styles: styles,
+          saved_styles: savedStyles,
+          style_map: subtitles.reduce((acc, sub, index) => {
+            if (sub.styleName) {
+              acc[index] = sub.styleName;
+            }
+            return acc;
+          }, {})
         }),
       });
 
@@ -191,12 +232,17 @@ function App() {
                     videoUrl={videoData.video_url}
                     subtitles={subtitles}
                     styles={styles}
+                    savedStyles={savedStyles}
                     onTimeUpdate={setCurrentTime}
                   />
 
                   <StyleEditor
                     styles={styles}
                     onStyleChange={setStyles}
+                    savedStyles={savedStyles}
+                    onSave={handleSaveStyle}
+                    onLoad={handleLoadStyle}
+                    onDelete={handleDeleteStyle}
                   />
 
                   <div className="text-center pt-4 flex justify-center space-x-4 flex-wrap gap-y-2">
@@ -247,13 +293,18 @@ function App() {
                 </div>
 
                 {/* Right Column: Subtitle Editor */}
-                <div className="lg:col-span-1">
+                <div className="lg:col-span-1 space-y-6">
                   <SubtitleEditor
                     subtitles={subtitles}
                     onSubtitlesChange={setSubtitles}
                     currentTime={currentTime}
-                    onSeek={handleSeek}
-                    onPause={handlePause}
+                    onTimeUpdate={setCurrentTime}
+                    videoRef={null}
+                    onSeek={(time) => {
+                      const video = document.querySelector('video');
+                      if (video) video.currentTime = time;
+                    }}
+                    savedStyles={savedStyles}
                   />
                 </div>
               </div>
