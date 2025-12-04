@@ -1,0 +1,357 @@
+import ollama
+import json
+import sys
+from .config import OLLAMA_MODEL, OLLAMA_HOST, MIN_CLIP_DURATION, MAX_CLIP_DURATION
+
+def extend_short_clips(clips: list, video_duration: float, target_duration: float = None) -> list:
+    """
+    Extends clips that are shorter than MIN_CLIP_DURATION by adding time before and after.
+
+    Args:
+        clips: List of clip dictionaries with 'start', 'end', 'title', 'reason'
+        video_duration: Total duration of the video in seconds
+        target_duration: Target minimum duration (defaults to MIN_CLIP_DURATION)
+
+    Returns:
+        List of extended clips
+    """
+    if target_duration is None:
+        target_duration = MIN_CLIP_DURATION
+
+    extended_clips = []
+
+    for clip in clips:
+        original_start = clip['start']
+        original_end = clip['end']
+        original_duration = original_end - original_start
+
+        if original_duration >= target_duration:
+            # Clip is already long enough
+            extended_clips.append(clip)
+            print(f"Clip '{clip.get('title', 'Unknown')}' is already {original_duration:.1f}s (>= {target_duration}s)")
+        else:
+            # Calculate how much time we need to add
+            additional_time = target_duration - original_duration
+
+            # Add time evenly before and after
+            time_before = additional_time / 2
+            time_after = additional_time / 2
+
+            # Calculate new start and end
+            new_start = max(0, original_start - time_before)
+            new_end = min(video_duration, original_end + time_after)
+
+            # If we hit the start boundary, add more to the end
+            if new_start == 0 and (new_end - new_start) < target_duration:
+                new_end = min(video_duration, target_duration)
+
+            # If we hit the end boundary, add more to the start
+            if new_end == video_duration and (new_end - new_start) < target_duration:
+                new_start = max(0, video_duration - target_duration)
+
+            extended_clip = {
+                'start': new_start,
+                'end': new_end,
+                'title': clip.get('title', 'Untitled'),
+                'reason': clip.get('reason', 'Interesting moment') + f" (extended from {original_duration:.1f}s)"
+            }
+
+            extended_clips.append(extended_clip)
+            print(f"Extended clip '{clip.get('title', 'Unknown')}' from {original_duration:.1f}s to {new_end - new_start:.1f}s (start: {original_start:.1f}→{new_start:.1f}, end: {original_end:.1f}→{new_end:.1f})")
+
+    return extended_clips
+
+def analyze_transcript_with_ai(segments: list, max_clips: int = 5) -> list:
+    """
+    Analyzes transcript segments using Ollama to identify interesting clips.
+    """
+
+    # If transcript chunk is still too long, sample segments to stay within context limits
+    # Ollama llama3.2 has a 4096 token context limit
+    MAX_SEGMENTS = 200  # Match CHUNK_SIZE to preserve full context for longer clips
+
+    if len(segments) > MAX_SEGMENTS:
+        # Sample segments evenly
+        step = len(segments) // MAX_SEGMENTS
+        sampled_segments = segments[::step]
+        print(f"Chunk too long ({len(segments)} segments). Sampling {len(sampled_segments)} segments.")
+    else:
+        sampled_segments = segments
+
+    # Prepare transcript text for the LLM
+    transcript_text = ""
+    for seg in sampled_segments:
+        # seg is expected to be a dict or object with start, end, text
+        # faster-whisper segments are objects
+        start = seg.start if hasattr(seg, 'start') else seg['start']
+        end = seg.end if hasattr(seg, 'end') else seg['end']
+        text = seg.text if hasattr(seg, 'text') else seg['text']
+        transcript_text += f"[{start:.2f}-{end:.2f}] {text}\n"
+
+    prompt = f"""Analyze this transcript and find TOPIC BOUNDARIES - timestamps where the topic/scene changes.
+
+Return a JSON array of boundary objects. Each object must have:
+- "timestamp": number (the time in seconds)
+- "description": string (what the new topic is about)
+
+Find {max_clips * 2} boundary timestamps where topics change, in chronological order.
+Try to space boundaries to create segments of varying lengths.
+
+Transcript:
+{transcript_text}
+
+Return ONLY the JSON array with no additional text."""
+
+    try:
+        # Retry logic for JSON parsing failures
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                sys.stderr.write(f"[CLIP_DETECTOR] Sending prompt to Ollama (model: {OLLAMA_MODEL}, attempt {attempt + 1}/{max_retries})...\n")
+                sys.stderr.write(f"[CLIP_DETECTOR] Transcript length: {len(transcript_text)} chars, {len(sampled_segments)} segments\n")
+                sys.stderr.flush()
+
+                client = ollama.Client(host=OLLAMA_HOST)
+                response = client.chat(
+                    model=OLLAMA_MODEL,
+                    messages=[{
+                        'role': 'user',
+                        'content': prompt,
+                    }],
+                    format='json'  # Force JSON output
+                )
+                break  # Success, exit retry loop
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise  # Last attempt failed, re-raise
+                sys.stderr.write(f"[CLIP_DETECTOR] Ollama request failed (attempt {attempt + 1}): {e}\n")
+                sys.stderr.flush()
+                continue
+
+        sys.stderr.write(f"[CLIP_DETECTOR] Got response from Ollama\n")
+        content = response['message']['content']
+        sys.stderr.write(f"[CLIP_DETECTOR] Response content length: {len(content)} chars\n")
+        sys.stderr.write(f"[CLIP_DETECTOR] Response preview: {content[:200]}...\n")
+        sys.stderr.flush()
+
+        # Try to parse JSON
+        # With format='json', content should be valid JSON directly
+        boundaries = json.loads(content.strip())
+
+        # Validate it's an array
+        if not isinstance(boundaries, list):
+            sys.stderr.write(f"[CLIP_DETECTOR] ERROR: Response is not an array, got {type(boundaries)}\n")
+            sys.stderr.flush()
+            return []
+
+        sys.stderr.write(f"[CLIP_DETECTOR] Successfully parsed JSON with {len(boundaries)} boundaries\n")
+        sys.stderr.flush()
+    except json.JSONDecodeError as e:
+        # Fallback: try to extract JSON array if format='json' failed
+        sys.stderr.write(f"[CLIP_DETECTOR] JSON parse failed: {e}, trying fallback extraction...\n")
+        import re
+        json_match = re.search(r'\[.*\]', content, re.DOTALL)
+        if json_match:
+            try:
+                boundaries = json.loads(json_match.group(0).strip())
+                sys.stderr.write(f"[CLIP_DETECTOR] Fallback successful: {len(boundaries)} boundaries\n")
+                sys.stderr.flush()
+            except:
+                sys.stderr.write(f"[CLIP_DETECTOR] Fallback failed. Full response:\n{content}\n")
+                sys.stderr.flush()
+                return []
+        else:
+            sys.stderr.write(f"[CLIP_DETECTOR] No JSON array found. Full response:\n{content}\n")
+            sys.stderr.flush()
+            return []
+
+    print(f"AI identified {len(boundaries)} topic boundaries")
+
+    # Sort boundaries by timestamp
+    boundaries = sorted(boundaries, key=lambda x: x.get('timestamp', 0))
+
+    # Create segments from boundaries
+    segments = []
+    for i in range(len(boundaries) - 1):
+        start = boundaries[i]['timestamp']
+        end = boundaries[i + 1]['timestamp']
+        duration = end - start
+
+        segment = {
+            'start': start,
+            'end': end,
+            'title': boundaries[i + 1].get('description', 'Topic Segment'),
+            'duration': duration
+        }
+        segments.append(segment)
+        print(f"Segment {i+1}: {start:.1f}-{end:.1f} ({duration:.1f}s) - {segment['title']}")
+
+    # Merge short segments to create clips >= MIN_CLIP_DURATION
+    clips = []
+    i = 0
+    while i < len(segments):
+        current_start = segments[i]['start']
+        current_end = segments[i]['end']
+        current_duration = current_end - current_start
+        titles = [segments[i]['title']]
+
+        # If this segment is too short, merge with next segments
+        j = i + 1
+        while current_duration < MIN_CLIP_DURATION and j < len(segments):
+            current_end = segments[j]['end']
+            current_duration = current_end - current_start
+            titles.append(segments[j]['title'])
+            j += 1
+
+        # If merged clip is too long, limit it to MAX_CLIP_DURATION
+        if current_duration > MAX_CLIP_DURATION:
+            current_end = current_start + MAX_CLIP_DURATION
+            current_duration = MAX_CLIP_DURATION
+            # Adjust j to reflect where we actually ended
+            while j > i + 1 and segments[j-1]['end'] > current_end:
+                titles.pop()
+                j -= 1
+
+        # Create the clip
+        clip = {
+            'start': current_start,
+            'end': current_end,
+            'title': ' → '.join(titles) if len(titles) > 1 else titles[0],
+            'reason': f"Merged {j - i} segment(s) ({current_duration:.1f}s)" if j - i > 1 else f"Single segment ({current_duration:.1f}s)"
+        }
+
+        # Only add if it meets minimum duration
+        if current_duration >= MIN_CLIP_DURATION:
+            clips.append(clip)
+            print(f"Created clip: {current_start:.1f}-{current_end:.1f} ({current_duration:.1f}s) - {clip['reason']}")
+        else:
+            print(f"Skipped remaining short segment: {current_start:.1f}-{current_end:.1f} ({current_duration:.1f}s)")
+
+        # Move to next unprocessed segment
+        i = j
+
+    print(f"Generated {len(clips)} clips from {len(segments)} segments")
+    return clips
+
+def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float) -> dict:
+    """
+    Evaluates the quality/interestingness of a clip using AI.
+    Returns a score (1-5 stars) and reasoning.
+
+    Args:
+        vtt_path: Path to the VTT subtitle file
+        start_time: Clip start time in seconds
+        end_time: Clip end time in seconds
+
+    Returns:
+        dict with 'score' (int 1-5) and 'reason' (str)
+    """
+    try:
+        # Parse VTT to extract text for this time range
+        with open(vtt_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        clip_text = ""
+        current_start = 0
+        current_end = 0
+
+        for i, line in enumerate(lines):
+            if "-->" in line:
+                times = line.strip().split(" --> ")
+
+                def parse_time(t):
+                    parts = t.split(":")
+                    seconds = float(parts[-1])
+                    if len(parts) > 1:
+                        seconds += int(parts[-2]) * 60
+                    if len(parts) > 2:
+                        seconds += int(parts[-3]) * 3600
+                    return seconds
+
+                current_start = parse_time(times[0])
+                current_end = parse_time(times[1])
+
+                # Check if this segment is within the clip range
+                if current_start >= start_time and current_end <= end_time:
+                    # Get the text line (next non-empty line)
+                    if i + 1 < len(lines):
+                        text_line = lines[i + 1].strip()
+                        if text_line and not text_line.isdigit() and "WEBVTT" not in text_line:
+                            clip_text += text_line + " "
+
+        if not clip_text.strip():
+            return {"score": 3, "reason": "字幕テキストが見つかりませんでした"}
+
+        sys.stderr.write(f"[CLIP_EVALUATOR] Evaluating clip {start_time:.1f}-{end_time:.1f}\n")
+        sys.stderr.write(f"[CLIP_EVALUATOR] Clip text length: {len(clip_text)} chars\n")
+        sys.stderr.flush()
+
+        # Prompt for AI evaluation
+        prompt = f"""You are a JSON-only API. You MUST respond with valid JSON and nothing else.
+
+Evaluate this video clip's interestingness and recommend score (1-5 stars).
+
+IMPORTANT: Your response must be ONLY a JSON object. No explanations, no text, ONLY JSON.
+
+Example response format (this is what your ENTIRE response should look like):
+{{"score": 4, "reason": "面白い会話で視聴者を引き込む内容"}}
+
+Scoring criteria:
+⭐️ 1 star: Boring, repetitive, no value
+⭐️⭐️ 2 stars: Somewhat interesting but lacks impact
+⭐️⭐️⭐️ 3 stars: Decent content, worth watching
+⭐️⭐️⭐️⭐️ 4 stars: Very interesting, engaging content
+⭐️⭐️⭐️⭐️⭐️ 5 stars: Exceptional, must-watch moment
+
+Clip duration: {end_time - start_time:.1f} seconds
+Clip transcript:
+{clip_text}
+
+JSON object with score (1-5) and reason (respond with ONLY the JSON, nothing else):"""
+
+        client = ollama.Client(host=OLLAMA_HOST)
+        response = client.chat(model=OLLAMA_MODEL, messages=[
+            {'role': 'user', 'content': prompt}
+        ])
+
+        content = response['message']['content']
+        sys.stderr.write(f"[CLIP_EVALUATOR] Response: {content[:200]}\n")
+        sys.stderr.flush()
+
+        # Extract JSON from response
+        import re
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            content = json_match.group(0)
+
+        result = json.loads(content.strip())
+
+        # Validate score is 1-5
+        if 'score' in result and isinstance(result['score'], (int, float)):
+            result['score'] = max(1, min(5, int(result['score'])))
+        else:
+            result['score'] = 3
+
+        if 'reason' not in result:
+            result['reason'] = "評価理由が取得できませんでした"
+
+        sys.stderr.write(f"[CLIP_EVALUATOR] Score: {result['score']}/5 - {result['reason']}\n")
+        sys.stderr.flush()
+
+        return result
+
+    except Exception as e:
+        sys.stderr.write(f"[CLIP_EVALUATOR] Error: {e}\n")
+        sys.stderr.flush()
+        return {"score": 3, "reason": f"評価エラー: {str(e)}"}
+
+def detect_clips(vtt_path: str, max_clips: int = 5) -> list:
+    """
+    Parses VTT and runs AI analysis.
+    This is a helper if we only have the VTT file.
+    For now, we might assume we have the segments from the transcription process directly,
+    but parsing VTT is good for re-analysis.
+    """
+    # TODO: Implement VTT parsing if needed.
+    # For now, we will rely on the main flow passing segments or re-reading them.
+    pass

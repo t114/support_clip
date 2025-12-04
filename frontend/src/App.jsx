@@ -1,0 +1,281 @@
+import React, { useState, useEffect } from 'react';
+import Upload from './components/Upload';
+import YouTubeClipCreator from './components/YouTubeClipCreator';
+import VideoPlayer from './components/VideoPlayer';
+import SubtitleEditor from './components/SubtitleEditor';
+import StyleEditor from './components/StyleEditor';
+import { parseVTT, stringifyVTT } from './utils/vtt';
+
+function App() {
+  const [status, setStatus] = useState('idle'); // idle, uploading, success, error
+  const [videoData, setVideoData] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [progressMessage, setProgressMessage] = useState('');
+  const [mode, setMode] = useState('upload'); // 'upload' or 'youtube'
+
+  // Subtitle State
+  const [subtitles, setSubtitles] = useState([]);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  // Style State
+  const [styles, setStyles] = useState({
+    fontSize: 24,
+    color: '#ffffff',
+    backgroundColor: '#00000080', // Hex with alpha
+    bottom: 10,
+    outlineColor: '#000000',
+    outlineWidth: 0,
+    fontWeight: 'normal',
+  });
+
+  const handleUploadStart = () => {
+    setStatus('uploading');
+    setErrorMessage('');
+  };
+
+  const handleUploadSuccess = async (data) => {
+    setVideoData(data);
+    try {
+      // Fetch and parse the VTT file
+      const response = await fetch(`${data.subtitle_url}`);
+      const vttText = await response.text();
+      const parsedSubtitles = parseVTT(vttText);
+      setSubtitles(parsedSubtitles);
+      setStatus('success');
+    } catch (e) {
+      console.error(e);
+      setErrorMessage('字幕ファイルの読み込みに失敗しました');
+      setStatus('error');
+    }
+  };
+
+  const handleUploadError = (msg) => {
+    setStatus('error');
+    setErrorMessage(msg);
+  };
+
+  const handleDownload = async () => {
+    if (!videoData) return;
+
+    const originalStatus = status;
+    setStatus('processing');
+    setProgressMessage('動画を作成しています... (数分かかる場合があります)');
+
+    try {
+      const vttContent = stringifyVTT(subtitles);
+
+      const response = await fetch('/burn', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          video_filename: videoData.unique_filename,
+          subtitle_content: vttContent,
+          styles: styles
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('動画の作成に失敗しました');
+      }
+
+      const data = await response.json();
+
+      setProgressMessage('ダウンロードを開始します...');
+
+      // Use the download endpoint which forces download via headers
+      // data.filename is the burned filename on disk (e.g. uuid_burned.mp4)
+      const downloadUrl = `/download/${data.filename}`;
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      // download attribute is ignored if header is set, but good to have
+      link.download = `captioned_${videoData.filename}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Keep the message for a moment
+      setTimeout(() => {
+        setStatus(originalStatus);
+        setProgressMessage('');
+      }, 3000);
+
+    } catch (e) {
+      console.error(e);
+      alert('動画の作成に失敗しました: ' + e.message);
+      setStatus(originalStatus);
+      setProgressMessage('');
+    }
+  };
+
+  const reset = () => {
+    setStatus('idle');
+    setVideoData(null);
+    setSubtitles([]);
+    setCurrentTime(0);
+  };
+
+  const handleSeek = (time) => {
+    const videoElement = document.querySelector('video');
+    if (videoElement) {
+      videoElement.currentTime = time;
+    }
+  };
+
+  const handlePause = () => {
+    const videoElement = document.querySelector('video');
+    if (videoElement) {
+      videoElement.pause();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            動画文字起こし・字幕編集アプリ
+          </h1>
+          <p className="text-gray-600">
+            AIで文字起こしを行い、字幕の内容やデザインを自由に編集できます
+          </p>
+        </div>
+
+        <div className="flex justify-center mb-8 space-x-4">
+          <button
+            onClick={() => setMode('upload')}
+            className={`px-4 py-2 rounded-md ${mode === 'upload' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 border'}`}
+          >
+            ファイルアップロード
+          </button>
+          <button
+            onClick={() => setMode('youtube')}
+            className={`px-4 py-2 rounded-md ${mode === 'youtube' ? 'bg-red-600 text-white' : 'bg-white text-gray-700 border'}`}
+          >
+            YouTube切り抜き
+          </button>
+        </div>
+
+        {mode === 'youtube' ? (
+          <YouTubeClipCreator />
+        ) : (
+          <>
+            {status === 'idle' && (
+              <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm p-8">
+                <Upload
+                  onUploadStart={handleUploadStart}
+                  onUploadSuccess={handleUploadSuccess}
+                  onUploadError={handleUploadError}
+                />
+              </div>
+            )}
+
+            {status === 'uploading' && (
+              <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm p-12 text-center">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <h3 className="text-xl font-medium text-gray-900">処理中...</h3>
+                <p className="text-gray-500 mt-2">
+                  動画のアップロードと文字起こしを行っています。<br />
+                  しばらくお待ちください。
+                </p>
+              </div>
+            )}
+
+            {(status === 'success' || status === 'processing') && videoData && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Left Column: Video and Style Editor */}
+                <div className="lg:col-span-2 space-y-6">
+                  <VideoPlayer
+                    videoUrl={videoData.video_url}
+                    subtitles={subtitles}
+                    styles={styles}
+                    onTimeUpdate={setCurrentTime}
+                  />
+
+                  <StyleEditor
+                    styles={styles}
+                    onStyleChange={setStyles}
+                  />
+
+                  <div className="text-center pt-4 flex justify-center space-x-4 flex-wrap gap-y-2">
+                    <button
+                      onClick={reset}
+                      className="px-6 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+                    >
+                      新しい動画をアップロード
+                    </button>
+                    <button
+                      onClick={handleDownload}
+                      disabled={status === 'processing'}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-blue-300"
+                    >
+                      {status === 'processing' ? progressMessage : '動画をダウンロード'}
+                    </button>
+
+                    {videoData?.srt_url && (
+                      <a
+                        href={videoData.srt_url}
+                        download
+                        className="px-6 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors flex items-center"
+                      >
+                        SRTをダウンロード
+                      </a>
+                    )}
+
+                    {videoData?.subtitle_url && (
+                      <a
+                        href={videoData.subtitle_url}
+                        download
+                        className="px-6 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors flex items-center"
+                      >
+                        VTTをダウンロード
+                      </a>
+                    )}
+
+                    {videoData?.fcpxml_url && (
+                      <a
+                        href={videoData.fcpxml_url}
+                        download
+                        className="px-6 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors flex items-center"
+                      >
+                        FCPXML (DaVinci)
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right Column: Subtitle Editor */}
+                <div className="lg:col-span-1">
+                  <SubtitleEditor
+                    subtitles={subtitles}
+                    onSubtitlesChange={setSubtitles}
+                    currentTime={currentTime}
+                    onSeek={handleSeek}
+                    onPause={handlePause}
+                  />
+                </div>
+              </div>
+            )}
+
+            {status === 'error' && (
+              <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm p-8 text-center">
+                <div className="text-red-500 text-xl mb-4">⚠️ エラーが発生しました</div>
+                <p className="text-gray-600 mb-6">{errorMessage}</p>
+                <button
+                  onClick={reset}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  やり直す
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default App;

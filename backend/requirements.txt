@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-multipart
+faster-whisper
+ffmpeg-python
+yt-dlp
+ollama
+pydub
