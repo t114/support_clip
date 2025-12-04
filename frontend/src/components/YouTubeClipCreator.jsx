@@ -91,7 +91,13 @@ function YouTubeClipCreator() {
             }
 
             setStatus('analyzing');
-            setMessage('AIが動画を分析して切り抜き箇所を探しています...');
+
+            // キャッシュ使用時のメッセージ
+            if (data.cached) {
+                setMessage('✓ キャッシュされた動画を使用しています（ダウンロードをスキップ）。AIが切り抜き箇所を探しています...');
+            } else {
+                setMessage('AIが動画を分析して切り抜き箇所を探しています...');
+            }
 
             // Reset analysis state
             setClips([]);
@@ -247,11 +253,27 @@ function YouTubeClipCreator() {
                     <div className="flex items-center gap-2">
                         <input
                             type="number"
-                            value={Math.floor(startTime / 60)}
+                            value={Math.floor(startTime / 3600)}
                             onChange={(e) => {
+                                const hours = parseInt(e.target.value) || 0;
+                                const minutes = Math.floor((startTime % 3600) / 60);
+                                const seconds = startTime % 60;
+                                setStartTime(Math.max(0, hours * 3600 + minutes * 60 + seconds));
+                            }}
+                            min="0"
+                            className="w-16 rounded-md border-gray-300 border p-2 text-sm"
+                            disabled={status === 'downloading' || status === 'analyzing'}
+                            placeholder="0"
+                        />
+                        <span className="text-sm text-gray-600">時間</span>
+                        <input
+                            type="number"
+                            value={Math.floor((startTime % 3600) / 60)}
+                            onChange={(e) => {
+                                const hours = Math.floor(startTime / 3600);
                                 const minutes = parseInt(e.target.value) || 0;
                                 const seconds = startTime % 60;
-                                setStartTime(Math.max(0, minutes * 60 + seconds));
+                                setStartTime(Math.max(0, hours * 3600 + minutes * 60 + seconds));
                             }}
                             min="0"
                             className="w-16 rounded-md border-gray-300 border p-2 text-sm"
@@ -263,9 +285,10 @@ function YouTubeClipCreator() {
                             type="number"
                             value={startTime % 60}
                             onChange={(e) => {
-                                const minutes = Math.floor(startTime / 60);
+                                const hours = Math.floor(startTime / 3600);
+                                const minutes = Math.floor((startTime % 3600) / 60);
                                 const seconds = parseInt(e.target.value) || 0;
-                                setStartTime(Math.max(0, minutes * 60 + Math.min(59, seconds)));
+                                setStartTime(Math.max(0, hours * 3600 + minutes * 60 + Math.min(59, seconds)));
                             }}
                             min="0"
                             max="59"

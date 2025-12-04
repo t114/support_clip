@@ -147,27 +147,48 @@ class YouTubeDownloadRequest(BaseModel):
 @app.post("/youtube/download")
 async def download_youtube(request: YouTubeDownloadRequest):
     try:
-        # Download video
+        # Download video (or use cache)
         video_info = download_youtube_video(request.url, UPLOAD_DIR)
         video_path = video_info["file_path"]
+        video_id = video_info["id"]
+        is_cached = video_info.get("cached", False)
         
-        # Transcribe immediately
-        vtt_path = transcribe_video(video_path)
-        srt_path = vtt_path.replace('.vtt', '.srt')
+        if is_cached:
+            print(f"Video is cached, checking for transcription files...")
+        
+        # 文字起こしファイルのキャッシュ確認
+        # 動画IDベースのファイル名を使用
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+        vtt_filename = f"{base_name}.vtt"
+        vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
+        srt_filename = f"{base_name}.srt"
+        srt_path = os.path.join(UPLOAD_DIR, srt_filename)
+        
+        # VTTファイルが存在しない場合のみ文字起こし実行
+        if not os.path.exists(vtt_path):
+            print(f"Transcribing video: {video_path}")
+            vtt_path = transcribe_video(video_path)
+            srt_path = vtt_path.replace('.vtt', '.srt')
+        else:
+            print(f"Using cached transcription: {vtt_path}")
         
         # Generate FCPXML
         from .transcribe import parse_vtt_file
         segments = parse_vtt_file(vtt_path)
         
-        # video_info already has duration but maybe not fps in the format we want?
-        # youtube_downloader might return info.
-        # Let's use get_video_info to be consistent and accurate with file on disk.
-        video_meta = get_video_info(video_path)
-        
-        fcpxml_filename = f"{os.path.basename(video_path)}.fcpxml"
+        # FCPXMLのキャッシュ確認
+        fcpxml_filename = f"{base_name}.fcpxml"
         fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
         
-        generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
+        if not os.path.exists(fcpxml_path):
+            print(f"Generating FCPXML: {fcpxml_path}")
+            # video_info already has duration but maybe not fps in the format we want?
+            # youtube_downloader might return info.
+            # Let's use get_video_info to be consistent and accurate with file on disk.
+            video_meta = get_video_info(video_path)
+            generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
+        else:
+            print(f"Using cached FCPXML: {fcpxml_path}")
         
         return {
             "video_url": f"/static/{os.path.basename(video_path)}",
@@ -176,7 +197,8 @@ async def download_youtube(request: YouTubeDownloadRequest):
             "fcpxml_url": f"/static/{fcpxml_filename}",
             "filename": os.path.basename(video_path),
             "video_info": video_info,
-            "start_time": video_info.get("start_time", 0)
+            "start_time": video_info.get("start_time", 0),
+            "cached": is_cached
         }
     except Exception as e:
         print(f"Error downloading YouTube video: {e}")

@@ -4,6 +4,7 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
     const videoRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [localClip, setLocalClip] = useState(clip);
+    const [currentTime, setCurrentTime] = useState(0);
 
     useEffect(() => {
         setLocalClip(clip);
@@ -12,12 +13,19 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
     const handleTimeUpdate = () => {
         if (videoRef.current) {
             const currentTime = videoRef.current.currentTime;
+            setCurrentTime(currentTime);
             if (currentTime >= localClip.end) {
                 videoRef.current.pause();
                 setIsPlaying(false);
                 videoRef.current.currentTime = localClip.start;
             }
         }
+    };
+
+    const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
     const playPreview = () => {
@@ -58,6 +66,10 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                         onPause={() => setIsPlaying(false)}
                         onPlay={() => setIsPlaying(true)}
                     />
+                    {/* Time Display */}
+                    <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs font-mono">
+                        {formatTime(currentTime)} / {formatTime(localClip.end - localClip.start)}
+                    </div>
                     <div className="absolute bottom-2 right-2 flex space-x-2">
                         {!isPlaying ? (
                             <button
@@ -96,24 +108,102 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">開始時間 (秒)</label>
-                            <input
-                                type="number"
-                                step="0.1"
-                                value={localClip.start}
-                                onChange={(e) => handleChange('start', parseFloat(e.target.value))}
-                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
-                            />
+                            <label className="block text-sm font-medium text-gray-700 mb-1">開始時間</label>
+                            <div className="flex items-center gap-1">
+                                <input
+                                    type="number"
+                                    value={Math.floor(localClip.start / 3600)}
+                                    onChange={(e) => {
+                                        const hours = parseInt(e.target.value) || 0;
+                                        const minutes = Math.floor((localClip.start % 3600) / 60);
+                                        const seconds = Math.floor(localClip.start % 60);
+                                        handleChange('start', hours * 3600 + minutes * 60 + seconds);
+                                    }}
+                                    min="0"
+                                    className="w-14 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border p-1.5"
+                                    placeholder="0"
+                                />
+                                <span className="text-xs text-gray-600">:</span>
+                                <input
+                                    type="number"
+                                    value={Math.floor((localClip.start % 3600) / 60)}
+                                    onChange={(e) => {
+                                        const hours = Math.floor(localClip.start / 3600);
+                                        const minutes = parseInt(e.target.value) || 0;
+                                        const seconds = Math.floor(localClip.start % 60);
+                                        handleChange('start', hours * 3600 + minutes * 60 + seconds);
+                                    }}
+                                    min="0"
+                                    max="59"
+                                    className="w-14 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border p-1.5"
+                                    placeholder="0"
+                                />
+                                <span className="text-xs text-gray-600">:</span>
+                                <input
+                                    type="number"
+                                    value={Math.floor(localClip.start % 60)}
+                                    onChange={(e) => {
+                                        const hours = Math.floor(localClip.start / 3600);
+                                        const minutes = Math.floor((localClip.start % 3600) / 60);
+                                        const seconds = parseInt(e.target.value) || 0;
+                                        handleChange('start', hours * 3600 + minutes * 60 + Math.min(59, seconds));
+                                    }}
+                                    min="0"
+                                    max="59"
+                                    className="w-14 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border p-1.5"
+                                    placeholder="0"
+                                />
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">{localClip.start.toFixed(1)}秒</div>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">終了時間 (秒)</label>
-                            <input
-                                type="number"
-                                step="0.1"
-                                value={localClip.end}
-                                onChange={(e) => handleChange('end', parseFloat(e.target.value))}
-                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
-                            />
+                            <label className="block text-sm font-medium text-gray-700 mb-1">終了時間</label>
+                            <div className="flex items-center gap-1">
+                                <input
+                                    type="number"
+                                    value={Math.floor(localClip.end / 3600)}
+                                    onChange={(e) => {
+                                        const hours = parseInt(e.target.value) || 0;
+                                        const minutes = Math.floor((localClip.end % 3600) / 60);
+                                        const seconds = Math.floor(localClip.end % 60);
+                                        handleChange('end', hours * 3600 + minutes * 60 + seconds);
+                                    }}
+                                    min="0"
+                                    className="w-14 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border p-1.5"
+                                    placeholder="0"
+                                />
+                                <span className="text-xs text-gray-600">:</span>
+                                <input
+                                    type="number"
+                                    value={Math.floor((localClip.end % 3600) / 60)}
+                                    onChange={(e) => {
+                                        const hours = Math.floor(localClip.end / 3600);
+                                        const minutes = parseInt(e.target.value) || 0;
+                                        const seconds = Math.floor(localClip.end % 60);
+                                        handleChange('end', hours * 3600 + minutes * 60 + seconds);
+                                    }}
+                                    min="0"
+                                    max="59"
+                                    className="w-14 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border p-1.5"
+                                    placeholder="0"
+                                />
+                                <span className="text-xs text-gray-600">:</span>
+                                <input
+                                    type="number"
+                                    value={Math.floor(localClip.end % 60)}
+                                    onChange={(e) => {
+                                        const hours = Math.floor(localClip.end / 3600);
+                                        const minutes = Math.floor((localClip.end % 3600) / 60);
+                                        const seconds = parseInt(e.target.value) || 0;
+                                        handleChange('end', hours * 3600 + minutes * 60 + Math.min(59, seconds));
+                                    }}
+                                    min="0"
+                                    max="59"
+                                    className="w-14 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border p-1.5"
+                                    placeholder="0"
+                                />
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">{localClip.end.toFixed(1)}秒</div>
                         </div>
                     </div>
 
@@ -144,8 +234,8 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                             onClick={() => onCreate(localClip)}
                             disabled={isCreating}
                             className={`px-3 py-1.5 text-white rounded text-sm font-medium ${isCreating
-                                    ? 'bg-green-400 cursor-not-allowed'
-                                    : 'bg-green-600 hover:bg-green-700'
+                                ? 'bg-green-400 cursor-not-allowed'
+                                : 'bg-green-600 hover:bg-green-700'
                                 }`}
                         >
                             {isCreating ? (

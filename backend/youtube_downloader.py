@@ -50,8 +50,56 @@ def extract_start_time_from_url(url: str) -> int:
 def download_youtube_video(url: str, output_dir: str) -> dict:
     """
     Downloads a YouTube video and returns the file path and video info.
+    既にダウンロード済みの場合はキャッシュを使用。
     """
     try:
+        # まず動画情報のみを取得（ダウンロードなし）
+        ydl_opts_info = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+        }
+        
+        print(f"Fetching video info for: {url}")
+        
+        with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+            except yt_dlp.utils.DownloadError as de:
+                error_msg = str(de)
+                print(f"DownloadError: {error_msg}")
+                if "Private video" in error_msg:
+                    raise Exception("この動画は非公開のため、ダウンロードできません")
+                elif "members-only" in error_msg or "available to this channel's members" in error_msg:
+                    raise Exception("この動画はメンバー限定のため、ダウンロードできません")
+                elif "This video is not available" in error_msg:
+                    raise Exception("この動画は利用できません（削除されたか、地域制限されている可能性があります）")
+                elif "age" in error_msg.lower():
+                    raise Exception("この動画は年齢制限があるため、ダウンロードできません")
+                else:
+                    raise Exception(f"ダウンロードエラー: {error_msg}")
+            
+            video_id = info.get('id', '')
+            
+            # キャッシュ確認：動画IDでファイルを検索
+            for ext in ['.mp4', '.mkv', '.webm']:
+                cached_file = os.path.join(output_dir, f"{video_id}{ext}")
+                if os.path.exists(cached_file):
+                    print(f"Using cached video: {cached_file}")
+                    return {
+                        "file_path": cached_file,
+                        "title": info.get('title', 'Unknown Title'),
+                        "duration": info.get('duration', 0),
+                        "thumbnail": info.get('thumbnail', ''),
+                        "id": video_id,
+                        "filename": os.path.basename(cached_file),
+                        "start_time": extract_start_time_from_url(url),
+                        "cached": True
+                    }
+        
+        # キャッシュがない場合は通常のダウンロード
+        print(f"Downloading new video: {url}")
+        
         ydl_opts = {
             'format': YOUTUBE_DOWNLOAD_FORMAT,
             'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
@@ -60,8 +108,6 @@ def download_youtube_video(url: str, output_dir: str) -> dict:
             'no_warnings': True,
             'extract_flat': False,
         }
-
-        print(f"Attempting to download YouTube video: {url}")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
@@ -106,7 +152,8 @@ def download_youtube_video(url: str, output_dir: str) -> dict:
                 "thumbnail": info.get('thumbnail', ''),
                 "id": info.get('id', ''),
                 "filename": os.path.basename(filename),
-                "start_time": extract_start_time_from_url(url)
+                "start_time": extract_start_time_from_url(url),
+                "cached": False
             }
 
     except yt_dlp.utils.DownloadError as e:
