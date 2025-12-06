@@ -13,6 +13,7 @@ export default defineConfig({
       '/download': 'http://127.0.0.1:8000',
       '/static': 'http://127.0.0.1:8000',
       '/youtube': 'http://127.0.0.1:8000',
+      '/progress': 'http://127.0.0.1:8000',
     },
   },
 })

@@ -18,6 +18,7 @@ function YouTubeClipCreator() {
     const [analyzedSegments, setAnalyzedSegments] = useState(0);
     const [creatingClipId, setCreatingClipId] = useState(null);
     const [startTime, setStartTime] = useState(0);
+    const [withComments, setWithComments] = useState(false);
 
     // YouTube URLからt=パラメータを抽出
     const extractStartTimeFromUrl = (url) => {
@@ -59,16 +60,74 @@ function YouTubeClipCreator() {
         }
     };
 
+    // YouTube URLから動画IDを抽出
+    const extractVideoId = (inputUrl) => {
+        if (!inputUrl) return null;
+        const url = inputUrl.trim();
+        try {
+            // Try URL object first
+            const urlObj = new URL(url);
+            if (urlObj.hostname === 'youtu.be') {
+                return urlObj.pathname.slice(1);
+            }
+            if (urlObj.hostname.includes('youtube.com')) {
+                return urlObj.searchParams.get('v');
+            }
+        } catch (e) {
+            // URL parsing failed, try regex
+        }
+
+        // Regex fallback for various formats (including those without protocol)
+        const match = url.match(/(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})/);
+        return match ? match[1] : null;
+    };
+
     const handleDownload = async () => {
         if (!url) return;
+        const trimmedUrl = url.trim();
+
         setStatus('downloading');
         setMessage('YouTube動画をダウンロード中... (これには時間がかかる場合があります)');
+
+        // Start polling for progress
+        const videoId = extractVideoId(trimmedUrl);
+        let progressInterval = null;
+
+        if (videoId) {
+            // Poll immediately once
+            const checkProgress = async () => {
+                try {
+                    const res = await fetch(`/progress/${videoId}`);
+                    if (res.ok) {
+                        const progressData = await res.json();
+                        if (progressData.status === 'transcribing') {
+                            setMessage(progressData.message || `文字起こし中... ${Math.round(progressData.progress)}%`);
+                        } else if (progressData.status === 'downloading') {
+                            setMessage(progressData.message || '動画をダウンロード中...');
+                        } else if (progressData.status === 'completed') {
+                            // Optional: update message if needed, but main request should finish soon
+                            // setMessage('処理完了。結果を取得中...');
+                        }
+                    }
+                } catch (e) {
+                    // Ignore polling errors
+                }
+            };
+
+            checkProgress();
+            progressInterval = setInterval(checkProgress, 1000);
+        } else {
+            console.warn("Could not extract video ID for polling");
+        }
 
         try {
             const response = await fetch('/youtube/download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
+                body: JSON.stringify({
+                    url: trimmedUrl,
+                    with_comments: withComments
+                })
             });
 
             if (!response.ok) {
@@ -94,7 +153,13 @@ function YouTubeClipCreator() {
 
             // キャッシュ使用時のメッセージ
             if (data.cached) {
-                setMessage('✓ キャッシュされた動画を使用しています（ダウンロードをスキップ）。AIが切り抜き箇所を探しています...');
+                let msg = '✓ キャッシュされた動画を使用しています（ダウンロードをスキップ）。';
+                if (withComments && !data.has_comments) {
+                    msg += ' コメントデータをダウンロード中...';
+                } else {
+                    msg += ' AIが切り抜き箇所を探しています...';
+                }
+                setMessage(msg);
             } else {
                 setMessage('AIが動画を分析して切り抜き箇所を探しています...');
             }
@@ -111,6 +176,10 @@ function YouTubeClipCreator() {
             console.error(e);
             setStatus('error');
             setMessage('エラーが発生しました: ' + e.message);
+        } finally {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
         }
     };
 
@@ -244,6 +313,19 @@ function YouTubeClipCreator() {
                     >
                         {status === 'downloading' ? 'ダウンロード中...' : '開始'}
                     </button>
+                </div>
+
+                <div className="mb-4">
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={withComments}
+                            onChange={(e) => setWithComments(e.target.checked)}
+                            disabled={status === 'downloading' || status === 'analyzing'}
+                            className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+                        />
+                        <span>コメント/チャットも取得して分析する（時間がかかる場合があります）</span>
+                    </label>
                 </div>
 
                 <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-md border border-gray-200">

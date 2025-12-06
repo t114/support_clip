@@ -6,7 +6,7 @@ import os
 import uuid
 from .transcribe import transcribe_video
 from .youtube_downloader import download_youtube_video
-from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality
+from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality, count_comments_in_clips
 from .video_clipper import extract_clip, merge_clips
 from .config import DEFAULT_MAX_CLIPS
 from .fcpxml_generator import generate_fcpxml
@@ -29,6 +29,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Mount static files to serve uploaded videos and generated subtitles
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
+
+import logging
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 @app.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
@@ -76,7 +81,7 @@ async def upload_video(file: UploadFile = File(...)):
         }
         
     except Exception as e:
-        print(f"Error processing upload: {e}")
+        logger.error(f"Error processing upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 from pydantic import BaseModel
@@ -123,7 +128,7 @@ async def burn_subtitles(request: BurnRequest):
         
         return {"filename": output_filename}
     except Exception as e:
-        print(f"Error burning subtitles: {e}")
+        logger.error(f"Error burning subtitles: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -151,18 +156,40 @@ async def download_video(filename: str):
 
 class YouTubeDownloadRequest(BaseModel):
     url: str
+    with_comments: bool = False
+
+from .progress import update_progress, get_progress, clear_progress
+
+@app.get("/progress/{video_id}")
+async def get_video_progress(video_id: str):
+    return get_progress(video_id)
 
 @app.post("/youtube/download")
-async def download_youtube(request: YouTubeDownloadRequest):
+def download_youtube(request: YouTubeDownloadRequest):
     try:
+        # Extract video ID early if possible, or wait until download
+        import re
+        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', request.url)
+        video_id = video_id_match.group(1) if video_id_match else "unknown"
+        
+        update_progress(video_id, "downloading", 0, "動画をダウンロード中...")
+        
         # Download video (or use cache)
-        video_info = download_youtube_video(request.url, UPLOAD_DIR)
+        # with_commentsフラグを渡す
+        video_info = download_youtube_video(request.url, UPLOAD_DIR, download_comments=request.with_comments)
         video_path = video_info["file_path"]
-        video_id = video_info["id"]
+        real_video_id = video_info["id"]
+        
+        # Update video_id if we guessed wrong (though usually regex is fine)
+        if real_video_id != video_id:
+            video_id = real_video_id
+            
+        update_progress(video_id, "downloading", 100, "ダウンロード完了")
+        
         is_cached = video_info.get("cached", False)
         
         if is_cached:
-            print(f"Video is cached, checking for transcription files...")
+            logger.info(f"Video is cached, checking for transcription files...")
         
         # 文字起こしファイルのキャッシュ確認
         # 動画IDベースのファイル名を使用
@@ -174,11 +201,19 @@ async def download_youtube(request: YouTubeDownloadRequest):
         
         # VTTファイルが存在しない場合のみ文字起こし実行
         if not os.path.exists(vtt_path):
-            print(f"Transcribing video: {video_path}")
-            vtt_path = transcribe_video(video_path)
+            logger.info(f"Transcribing video: {video_path}")
+            update_progress(video_id, "transcribing", 0, "文字起こし準備中...")
+            
+            def progress_callback(percent):
+                update_progress(video_id, "transcribing", percent, f"文字起こし中... {int(percent)}%")
+                
+            vtt_path = transcribe_video(video_path, progress_callback=progress_callback)
             srt_path = vtt_path.replace('.vtt', '.srt')
+            
+            update_progress(video_id, "transcribing", 100, "文字起こし完了")
         else:
-            print(f"Using cached transcription: {vtt_path}")
+            logger.info(f"Using cached transcription: {vtt_path}")
+            update_progress(video_id, "completed", 100, "キャッシュを使用中")
         
         # Generate FCPXML
         from .transcribe import parse_vtt_file
@@ -189,14 +224,16 @@ async def download_youtube(request: YouTubeDownloadRequest):
         fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
         
         if not os.path.exists(fcpxml_path):
-            print(f"Generating FCPXML: {fcpxml_path}")
+            logger.info(f"Generating FCPXML: {fcpxml_path}")
             # video_info already has duration but maybe not fps in the format we want?
             # youtube_downloader might return info.
             # Let's use get_video_info to be consistent and accurate with file on disk.
             video_meta = get_video_info(video_path)
             generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
         else:
-            print(f"Using cached FCPXML: {fcpxml_path}")
+            logger.info(f"Using cached FCPXML: {fcpxml_path}")
+        
+        update_progress(video_id, "completed", 100, "処理完了")
         
         return {
             "video_url": f"/static/{os.path.basename(video_path)}",
@@ -206,10 +243,16 @@ async def download_youtube(request: YouTubeDownloadRequest):
             "filename": os.path.basename(video_path),
             "video_info": video_info,
             "start_time": video_info.get("start_time", 0),
-            "cached": is_cached
+            "cached": is_cached,
+            "has_comments": video_info.get("comments_file") is not None
         }
     except Exception as e:
-        print(f"Error downloading YouTube video: {e}")
+        logger.error(f"Error downloading YouTube video: {e}")
+        # Try to extract video ID to update error status
+        import re
+        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', request.url)
+        if video_id_match:
+             update_progress(video_id_match.group(1), "error", 0, f"エラー: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 class AnalyzeRequest(BaseModel):
@@ -314,6 +357,18 @@ async def analyze_video(request: AnalyzeRequest):
 
         # Analyze with hybrid detection (silence + sentence boundaries)
         clips = detect_boundaries_hybrid(video_path, segments_chunk, request.max_clips, request.start_time)
+
+        # Count comments if available
+        # VTT filename is usually [video_id].vtt
+        # Comments file is [video_id].info.json
+        base_name = os.path.splitext(request.vtt_filename)[0]
+        comments_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+        
+        if os.path.exists(comments_path):
+            print(f"Found comments file: {comments_path}")
+            clips = count_comments_in_clips(clips, comments_path)
+        else:
+            print(f"No comments file found at {comments_path}")
 
         # Automatically evaluate each clip
         print(f"Evaluating {len(clips)} clips...")

@@ -2,6 +2,8 @@ import ollama
 import json
 import sys
 import re
+import math
+import os
 from pydub import AudioSegment
 from pydub.silence import detect_silence
 from .config import OLLAMA_MODEL, OLLAMA_HOST, MIN_CLIP_DURATION, MAX_CLIP_DURATION
@@ -379,7 +381,7 @@ Your JSON array (start with [):"""
                 sys.stderr.write(f"[CLIP_DETECTOR] Transcript length: {len(transcript_text)} chars, {len(sampled_segments)} segments\n")
                 sys.stderr.flush()
 
-                client = ollama.Client(host=OLLAMA_HOST)
+                client = ollama.Client(host=OLLAMA_HOST, timeout=60.0)
                 response = client.chat(
                     model=OLLAMA_MODEL,
                     messages=[
@@ -700,12 +702,13 @@ def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float) -> 
 
 スコア（1-5）とreason（理由を日本語で）を含むJSONオブジェクト（JSONのみで応答、他のテキストは含めない）:"""
 
-        client = ollama.Client(host=OLLAMA_HOST)
+        client = ollama.Client(host=OLLAMA_HOST, timeout=60.0)
         response = client.chat(model=OLLAMA_MODEL, messages=[
-            {'role': 'user', 'content': prompt}
-        ])
-
-        content = response['message']['content']
+            {
+                'role': 'user',
+                'content': prompt,
+            },
+        ], format='json', options={'temperature': 0.3})
         sys.stderr.write(f"[CLIP_EVALUATOR] Response: {content[:200]}\n")
         sys.stderr.flush()
 
@@ -736,13 +739,101 @@ def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float) -> 
         sys.stderr.flush()
         return {"score": 3, "reason": f"評価エラー: {str(e)}"}
 
-def detect_clips(vtt_path: str, max_clips: int = 5) -> list:
-    """
-    Parses VTT and runs AI analysis.
-    This is a helper if we only have the VTT file.
-    For now, we might assume we have the segments from the transcription process directly,
-    but parsing VTT is good for re-analysis.
-    """
     # TODO: Implement VTT parsing if needed.
     # For now, we will rely on the main flow passing segments or re-reading them.
     pass
+
+def count_comments_in_clips(clips: list, comments_path: str) -> list:
+    """
+    Counts comments within the time range of each clip.
+    
+    Args:
+        clips: List of clip dictionaries
+        comments_path: Path to the .info.json file containing comments
+        
+    Returns:
+        List of clips with 'comment_count' field added
+    """
+    try:
+        if not os.path.exists(comments_path):
+            print(f"Comments file not found: {comments_path}")
+            return clips
+            
+        print(f"Loading comments from {comments_path}...")
+        
+        comment_times = []
+        
+        # Check if it's a live chat file (NDJSON)
+        if comments_path.endswith('.live_chat.json'):
+            print("Parsing live chat data (NDJSON)...")
+            with open(comments_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        # Extract videoOffsetTimeMsec
+                        # Structure: replayChatItemAction -> videoOffsetTimeMsec
+                        if 'replayChatItemAction' in data:
+                            action = data['replayChatItemAction']
+                            if 'videoOffsetTimeMsec' in action:
+                                msec = int(action['videoOffsetTimeMsec'])
+                                comment_times.append(msec / 1000.0)
+                    except Exception as e:
+                        continue
+                        
+        else:
+            # Standard info.json format
+            print("Parsing standard info.json...")
+            with open(comments_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            # Extract comments
+            comments = []
+            if 'comments' in data:
+                comments = data['comments']
+            else:
+                print("No 'comments' field in JSON data")
+                return clips
+                
+            print(f"Found {len(comments)} comments. Counting per clip...")
+            
+            for c in comments:
+                t = None
+                
+                # 1. Check for explicit offset (Live Chat)
+                if 'offset_seconds' in c:
+                    t = float(c['offset_seconds'])
+                
+                # 2. Check for timestamps in text
+                if t is None and 'text' in c:
+                    text = c['text']
+                    # Search for mm:ss or h:mm:ss pattern
+                    match = re.search(r'(?:(\d+):)?(\d+):(\d+)', text)
+                    if match:
+                        # Found a timestamp in comment
+                        groups = match.groups()
+                        seconds = int(groups[2])
+                        minutes = int(groups[1])
+                        hours = int(groups[0]) if groups[0] else 0
+                        t = hours * 3600 + minutes * 60 + seconds
+                
+                if t is not None:
+                    comment_times.append(t)
+                
+        print(f"Extracted {len(comment_times)} time-synced comments/timestamps")
+        
+        # Count for each clip
+        for clip in clips:
+            start = clip['start']
+            end = clip['end']
+            count = sum(1 for t in comment_times if start <= t <= end)
+            clip['comment_count'] = count
+            
+        return clips
+        
+    except Exception as e:
+        print(f"Error counting comments: {e}")
+        import traceback
+        traceback.print_exc()
+        return clips

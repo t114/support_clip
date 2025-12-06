@@ -51,10 +51,14 @@ def create_srt(segments) -> str:
         
     return "\n".join(srt_output)
 
-def transcribe_video(video_path: str) -> str:
+def transcribe_video(video_path: str, progress_callback=None) -> str:
     """
     Transcribes the video and returns the path to the generated VTT file.
     Also generates an SRT file in the same location.
+    
+    Args:
+        video_path: Path to the video file
+        progress_callback: Optional function(progress_percent: float) to call during transcription
     """
     print(f"Transcribing {video_path}...")
     
@@ -63,8 +67,29 @@ def transcribe_video(video_path: str) -> str:
     
     print(f"Detected language '{info.language}' with probability {info.language_probability}")
     
-    # Convert generator to list to process segments
-    segments_list = list(segments)
+    # Convert generator to list to process segments and log progress
+    segments_list = []
+    
+    # Estimate total duration for progress calculation if possible
+    # info.duration might be available in newer versions or if provided
+    total_duration = info.duration
+    
+    for i, segment in enumerate(segments):
+        segments_list.append(segment)
+        
+        # Calculate progress
+        if total_duration and total_duration > 0:
+            progress = min(99, (segment.end / total_duration) * 100)
+            if progress_callback:
+                progress_callback(progress)
+        
+        if i % 50 == 0:
+            print(f"Transcribed segment {i}: {segment.start:.1f}s - {segment.end:.1f}s")
+            
+    if progress_callback:
+        progress_callback(100)
+    
+    print(f"Transcription complete. Total segments: {len(segments_list)}")
     
     # Generate VTT
     vtt_content = create_vtt(segments_list)

@@ -47,7 +47,7 @@ def extract_start_time_from_url(url: str) -> int:
     
     return 0
 
-def download_youtube_video(url: str, output_dir: str) -> dict:
+def download_youtube_video(url: str, output_dir: str, download_comments: bool = False) -> dict:
     """
     Downloads a YouTube video and returns the file path and video info.
     既にダウンロード済みの場合はキャッシュを使用。
@@ -86,6 +86,32 @@ def download_youtube_video(url: str, output_dir: str) -> dict:
                 cached_file = os.path.join(output_dir, f"{video_id}{ext}")
                 if os.path.exists(cached_file):
                     print(f"Using cached video: {cached_file}")
+                    
+                    # コメントファイルの確認
+                    comments_file = os.path.join(output_dir, f"{video_id}.info.json")
+                    live_chat_file = os.path.join(output_dir, f"{video_id}.live_chat.json")
+                    has_comments = os.path.exists(comments_file) or os.path.exists(live_chat_file)
+                    
+                    # コメントが必要で、まだない場合はダウンロードが必要
+                    if download_comments and not has_comments:
+                        print(f"Video cached but comments missing. Downloading comments for: {url}")
+                        # コメントのみダウンロードする設定
+                        ydl_opts_comments = {
+                            'skip_download': True,  # 動画はダウンロードしない
+                            'writeinfojson': True,  # info.jsonを保存（コメント含む）
+                            'getcomments': True,    # コメントを取得
+                            'writesubtitles': True, # 字幕（ライブチャット含む）を取得
+                            'subtitleslangs': ['live_chat'], # ライブチャットを指定
+                            'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
+                            'quiet': True,
+                            'no_warnings': True,
+                        }
+                        with yt_dlp.YoutubeDL(ydl_opts_comments) as ydl_c:
+                            ydl_c.extract_info(url, download=True)
+                        
+                        # 再確認
+                        has_comments = os.path.exists(comments_file) or os.path.exists(live_chat_file)
+
                     return {
                         "file_path": cached_file,
                         "title": info.get('title', 'Unknown Title'),
@@ -94,7 +120,8 @@ def download_youtube_video(url: str, output_dir: str) -> dict:
                         "id": video_id,
                         "filename": os.path.basename(cached_file),
                         "start_time": extract_start_time_from_url(url),
-                        "cached": True
+                        "cached": True,
+                        "comments_file": live_chat_file if os.path.exists(live_chat_file) else (comments_file if os.path.exists(comments_file) else None)
                     }
         
         # キャッシュがない場合は通常のダウンロード
@@ -108,6 +135,13 @@ def download_youtube_video(url: str, output_dir: str) -> dict:
             'no_warnings': True,
             'extract_flat': False,
         }
+        
+        # コメント取得オプション
+        if download_comments:
+            ydl_opts['writeinfojson'] = True
+            ydl_opts['getcomments'] = True
+            ydl_opts['writesubtitles'] = True
+            ydl_opts['subtitleslangs'] = ['live_chat']
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
@@ -139,6 +173,17 @@ def download_youtube_video(url: str, output_dir: str) -> dict:
                     if os.path.exists(f"{base_name}{ext}"):
                         filename = f"{base_name}{ext}"
                         break
+            
+            # コメントファイル（info.json または live_chat.json）のパス
+            video_id = info.get('id', '')
+            comments_file = os.path.join(output_dir, f"{video_id}.info.json")
+            live_chat_file = os.path.join(output_dir, f"{video_id}.live_chat.json")
+            
+            final_comments_file = None
+            if os.path.exists(live_chat_file):
+                final_comments_file = live_chat_file
+            elif os.path.exists(comments_file):
+                final_comments_file = comments_file
 
             if not os.path.exists(filename):
                 raise Exception(f"ダウンロードしたファイルが見つかりません: {filename}")
@@ -153,7 +198,8 @@ def download_youtube_video(url: str, output_dir: str) -> dict:
                 "id": info.get('id', ''),
                 "filename": os.path.basename(filename),
                 "start_time": extract_start_time_from_url(url),
-                "cached": False
+                "cached": False,
+                "comments_file": final_comments_file
             }
 
     except yt_dlp.utils.DownloadError as e:
