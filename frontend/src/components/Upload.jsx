@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
 export default function Upload({ onUploadStart, onUploadSuccess, onUploadError }) {
+    const [modelSize, setModelSize] = useState('base');
     const [isDragging, setIsDragging] = useState(false);
 
     const handleDragOver = (e) => {
@@ -36,6 +37,7 @@ export default function Upload({ onUploadStart, onUploadSuccess, onUploadError }
         onUploadStart();
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('model_size', modelSize);
 
         try {
             const response = await fetch('/upload', {
@@ -71,6 +73,23 @@ export default function Upload({ onUploadStart, onUploadSuccess, onUploadError }
                 <p className="text-gray-500">
                     ここに動画をドラッグ＆ドロップするか、クリックして選択してください
                 </p>
+
+                <div className="flex justify-center items-center gap-2 mt-4">
+                    <label className="text-sm text-gray-600">モデル:</label>
+                    <select
+                        value={modelSize}
+                        onChange={(e) => setModelSize(e.target.value)}
+                        className="p-1 border rounded bg-white text-sm"
+                        onClick={(e) => e.stopPropagation()} // Prevent triggering drop zone click
+                    >
+                        <option value="tiny">tiny (最速・低精度)</option>
+                        <option value="base">base (推奨・バランス)</option>
+                        <option value="small">small (高精度・遅い)</option>
+                        <option value="medium">medium (超高精度・激遅)</option>
+                        <option value="large">large (最高精度・激重)</option>
+                    </select>
+                </div>
+
                 <input
                     type="file"
                     accept="video/*"

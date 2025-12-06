@@ -4,8 +4,7 @@ import sys
 import re
 import math
 import os
-from pydub import AudioSegment
-from pydub.silence import detect_silence
+import subprocess
 from .config import OLLAMA_MODEL, OLLAMA_HOST, MIN_CLIP_DURATION, MAX_CLIP_DURATION
 
 def extend_short_clips(clips: list, video_duration: float, target_duration: float = None) -> list:
@@ -79,24 +78,44 @@ def detect_silence_boundaries(video_path: str, min_silence_len: int = 800, silen
         無音区間の終了時刻のリスト（秒）
     """
     try:
-        sys.stderr.write(f"[SILENCE_DETECTOR] Loading audio from {video_path}...\n")
+        sys.stderr.write(f"[SILENCE_DETECTOR] Detecting silence using ffmpeg (min_len={min_silence_len}ms, thresh={silence_thresh}dB)...\n")
         sys.stderr.flush()
 
-        # 音声を読み込む
-        audio = AudioSegment.from_file(video_path)
-
-        sys.stderr.write(f"[SILENCE_DETECTOR] Detecting silence (min_len={min_silence_len}ms, thresh={silence_thresh}dB)...\n")
-        sys.stderr.flush()
-
-        # 無音区間を検出
-        silence_ranges = detect_silence(audio, min_silence_len=min_silence_len, silence_thresh=silence_thresh)
-
-        # 無音区間の終了時刻を境界とする（秒に変換）
+        # Convert ms to seconds for ffmpeg
+        duration_sec = min_silence_len / 1000.0
+        
+        # Construct ffmpeg command
+        # ffmpeg -i input.mp4 -af silencedetect=noise=-40dB:d=0.8 -f null -
+        cmd = [
+            'ffmpeg',
+            '-i', video_path,
+            '-af', f'silencedetect=noise={silence_thresh}dB:d={duration_sec}',
+            '-f', 'null',
+            '-'
+        ]
+        
+        # Run ffmpeg
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+        
+        _, stderr = process.communicate()
+        
+        # Parse output for silence_end
         boundaries = []
-        for start_ms, end_ms in silence_ranges:
-            # 無音区間の終わり = 次の話の始まり
-            boundary_time = end_ms / 1000.0
-            boundaries.append(boundary_time)
+        for line in stderr.split('\n'):
+            if 'silence_end' in line:
+                # Example: [silencedetect @ ...] silence_end: 125.789 | silence_duration: 2.333
+                try:
+                    parts = line.split('silence_end: ')
+                    if len(parts) > 1:
+                        end_time_str = parts[1].split('|')[0].strip()
+                        boundaries.append(float(end_time_str))
+                except Exception as e:
+                    print(f"Error parsing line: {line}, error: {e}")
 
         sys.stderr.write(f"[SILENCE_DETECTOR] Found {len(boundaries)} silence boundaries\n")
         sys.stderr.flush()
@@ -780,7 +799,12 @@ def count_comments_in_clips(clips: list, comments_path: str) -> list:
                                 msec = int(action['videoOffsetTimeMsec'])
                                 comment_times.append(msec / 1000.0)
                     except Exception as e:
+                        print(f"Error parsing line: {e}")
                         continue
+                        
+            print(f"Parsed {len(comment_times)} timestamps from live chat file.")
+            if comment_times:
+                print(f"Comment time range: {min(comment_times):.1f}s to {max(comment_times):.1f}s")
                         
         else:
             # Standard info.json format
@@ -827,8 +851,18 @@ def count_comments_in_clips(clips: list, comments_path: str) -> list:
         for clip in clips:
             start = clip['start']
             end = clip['end']
+            duration = end - start
             count = sum(1 for t in comment_times if start <= t <= end)
             clip['comment_count'] = count
+            
+            # Calculate comments per minute
+            if duration > 0:
+                cpm = (count / duration) * 60
+                clip['comments_per_minute'] = round(cpm, 1)
+            else:
+                clip['comments_per_minute'] = 0
+                
+            print(f"Clip '{clip['title']}' ({start:.1f}-{end:.1f}): {count} comments ({clip['comments_per_minute']}/min)")
             
         return clips
         

@@ -230,8 +230,8 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                                 <span className="text-lg">💬</span>
                                 <span className="text-sm font-medium text-gray-700">コメント数:</span>
                                 <span className="text-lg font-bold text-blue-700">{localClip.comment_count}</span>
-                                <span className="text-xs text-gray-500 ml-auto">
-                                    (密度: {(localClip.comment_count / (localClip.end - localClip.start)).toFixed(1)} /秒)
+                                <span className="text-sm text-gray-600 ml-2">
+                                    ({localClip.comments_per_minute !== undefined ? localClip.comments_per_minute : ((localClip.comment_count / (localClip.end - localClip.start)) * 60).toFixed(1)}/分)
                                 </span>
                             </div>
                         </div>

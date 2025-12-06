@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
@@ -36,7 +36,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 @app.post("/upload")
-async def upload_video(file: UploadFile = File(...)):
+async def upload_video(
+    file: UploadFile = File(...),
+    model_size: str = Form("base")
+):
     try:
         # Generate unique filename
         file_extension = os.path.splitext(file.filename)[1]
@@ -52,7 +55,7 @@ async def upload_video(file: UploadFile = File(...)):
             
         # Transcribe
         # Note: In a real app, this should be a background task
-        vtt_path = transcribe_video(file_path)
+        vtt_path = transcribe_video(file_path, model_size=model_size)
         
         # Return URLs relative to the static mount
         srt_path = vtt_path.replace('.vtt', '.srt')
@@ -157,6 +160,7 @@ async def download_video(filename: str):
 class YouTubeDownloadRequest(BaseModel):
     url: str
     with_comments: bool = False
+    model_size: str = "base"
 
 from .progress import update_progress, get_progress, clear_progress
 
@@ -169,8 +173,44 @@ def download_youtube(request: YouTubeDownloadRequest):
     try:
         # Extract video ID early if possible, or wait until download
         import re
+        import time
         video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', request.url)
         video_id = video_id_match.group(1) if video_id_match else "unknown"
+        
+        # Check if job is already running
+        current_progress = get_progress(video_id)
+        current_status = current_progress.get("status")
+        last_updated = current_progress.get("updated_at", 0)
+        now = time.time()
+        
+        # If active and updated recently (within 2 minutes), wait for it
+        if current_status in ["downloading", "transcribing"] and (now - last_updated) < 120:
+            logger.info(f"Job for {video_id} is already running (status: {current_status}). Waiting for completion...")
+            
+            # Wait loop
+            while True:
+                time.sleep(2)
+                prog = get_progress(video_id)
+                status = prog.get("status")
+                
+                if status == "completed":
+                    logger.info(f"Existing job for {video_id} completed. Returning result.")
+                    # Proceed to return result using cached files
+                    # We need to populate video_info and paths.
+                    # Since it's completed, files should exist.
+                    # We can just fall through to the "is_cached" logic, 
+                    # but we need to set video_info.
+                    # Let's just break and let the code proceed. 
+                    # The download_youtube_video call will see the files and return cached info.
+                    break
+                
+                if status == "error":
+                    raise HTTPException(status_code=500, detail=f"Previous job failed: {prog.get('message')}")
+                
+                # Check timeout or stale
+                if (time.time() - prog.get("updated_at", 0)) > 120:
+                    logger.warning(f"Existing job for {video_id} seems stalled. Taking over.")
+                    break
         
         update_progress(video_id, "downloading", 0, "動画をダウンロード中...")
         
@@ -207,7 +247,7 @@ def download_youtube(request: YouTubeDownloadRequest):
             def progress_callback(percent):
                 update_progress(video_id, "transcribing", percent, f"文字起こし中... {int(percent)}%")
                 
-            vtt_path = transcribe_video(video_path, progress_callback=progress_callback)
+            vtt_path = transcribe_video(video_path, progress_callback=progress_callback, model_size=request.model_size)
             srt_path = vtt_path.replace('.vtt', '.srt')
             
             update_progress(video_id, "transcribing", 100, "文字起こし完了")
@@ -360,15 +400,23 @@ async def analyze_video(request: AnalyzeRequest):
 
         # Count comments if available
         # VTT filename is usually [video_id].vtt
-        # Comments file is [video_id].info.json
+        # Comments file is [video_id].live_chat.json or [video_id].info.json
         base_name = os.path.splitext(request.vtt_filename)[0]
-        comments_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
         
-        if os.path.exists(comments_path):
+        live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
+        info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+        
+        comments_path = None
+        if os.path.exists(live_chat_path):
+            comments_path = live_chat_path
+        elif os.path.exists(info_json_path):
+            comments_path = info_json_path
+        
+        if comments_path:
             print(f"Found comments file: {comments_path}")
             clips = count_comments_in_clips(clips, comments_path)
         else:
-            print(f"No comments file found at {comments_path}")
+            print(f"No comments file found for {base_name}")
 
         # Automatically evaluate each clip
         print(f"Evaluating {len(clips)} clips...")

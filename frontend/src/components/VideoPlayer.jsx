@@ -11,8 +11,9 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
             const time = videoRef.current.currentTime;
             onTimeUpdate(time);
 
-            const sub = subtitles.find(sub => time >= sub.start && time <= sub.end);
-            setActiveSub(sub || null);
+            // Find active subtitle
+            const sub = subtitles.find(s => time >= s.start && time <= s.end);
+            setActiveSub(sub);
         }
     };
 

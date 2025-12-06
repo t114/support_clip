@@ -93,8 +93,21 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                     has_comments = os.path.exists(comments_file) or os.path.exists(live_chat_file)
                     
                     # コメントが必要で、まだない場合はダウンロードが必要
-                    if download_comments and not has_comments:
-                        print(f"Video cached but comments missing. Downloading comments for: {url}")
+                    # また、ライブ配信だったのにlive_chatがない場合も再試行
+                    is_live_archive = False
+                    if os.path.exists(comments_file):
+                        try:
+                            with open(comments_file, 'r', encoding='utf-8') as f:
+                                info_data = json.load(f)
+                                if info_data.get('was_live') or info_data.get('is_live'):
+                                    is_live_archive = True
+                        except:
+                            pass
+
+                    missing_live_chat = is_live_archive and not os.path.exists(live_chat_file)
+                    
+                    if download_comments and (not has_comments or missing_live_chat):
+                        print(f"Video cached but comments missing (or live chat missing). Downloading comments for: {url}")
                         # コメントのみダウンロードする設定
                         ydl_opts_comments = {
                             'skip_download': True,  # 動画はダウンロードしない
@@ -103,11 +116,15 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                             'writesubtitles': True, # 字幕（ライブチャット含む）を取得
                             'subtitleslangs': ['live_chat'], # ライブチャットを指定
                             'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
-                            'quiet': True,
-                            'no_warnings': True,
+                            'quiet': False,
+                            'no_warnings': False,
                         }
-                        with yt_dlp.YoutubeDL(ydl_opts_comments) as ydl_c:
-                            ydl_c.extract_info(url, download=True)
+                        try:
+                            with yt_dlp.YoutubeDL(ydl_opts_comments) as ydl_c:
+                                ydl_c.extract_info(url, download=True)
+                        except Exception as e:
+                            print(f"Warning: Failed to download comments/live chat: {e}")
+                            # Continue without comments if download fails
                         
                         # 再確認
                         has_comments = os.path.exists(comments_file) or os.path.exists(live_chat_file)
@@ -131,17 +148,17 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
             'format': YOUTUBE_DOWNLOAD_FORMAT,
             'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
             'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': False,
+            'no_warnings': False,
             'extract_flat': False,
         }
         
-        # コメント取得オプション
-        if download_comments:
-            ydl_opts['writeinfojson'] = True
-            ydl_opts['getcomments'] = True
-            ydl_opts['writesubtitles'] = True
-            ydl_opts['subtitleslangs'] = ['live_chat']
+        # コメント取得オプションはここでは設定しない（後で別に行う）
+        # if download_comments:
+        #     ydl_opts['writeinfojson'] = True
+        #     ydl_opts['getcomments'] = True
+        #     ydl_opts['writesubtitles'] = True
+        #     ydl_opts['subtitleslangs'] = ['live_chat']
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
@@ -178,6 +195,26 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
             video_id = info.get('id', '')
             comments_file = os.path.join(output_dir, f"{video_id}.info.json")
             live_chat_file = os.path.join(output_dir, f"{video_id}.live_chat.json")
+            
+            # コメントのダウンロード（動画ダウンロード後に行う）
+            if download_comments:
+                print(f"Downloading comments for: {url}")
+                ydl_opts_comments = {
+                    'skip_download': True,
+                    'writeinfojson': True,
+                    'getcomments': True,
+                    'writesubtitles': True,
+                    'subtitleslangs': ['live_chat'],
+                    'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
+                    'quiet': False,
+                    'no_warnings': False,
+                }
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts_comments) as ydl_c:
+                        ydl_c.extract_info(url, download=True)
+                except Exception as e:
+                    print(f"Warning: Failed to download comments/live chat: {e}")
+                    # Continue without comments
             
             final_comments_file = None
             if os.path.exists(live_chat_file):

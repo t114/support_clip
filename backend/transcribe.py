@@ -3,55 +3,76 @@ import os
 
 # Load the model globally to avoid reloading it for every request
 # Using 'base' for faster processing speed (good balance of speed and accuracy)
-# device="cpu" and compute_type="int8" for CPU inference
-model = WhisperModel("base", device="cpu", compute_type="int8")
+import gc
+
+# Global variable to hold the current model and its size
+current_model = None
+current_model_size = None
+
+def get_model(model_size: str):
+    """
+    Get the Whisper model instance.
+    If the requested size is different from the current one, reload the model.
+    """
+    global current_model, current_model_size
+    
+    if current_model is not None and current_model_size == model_size:
+        return current_model
+    
+    print(f"Loading Whisper model: {model_size}...")
+    
+    # Unload previous model if exists
+    if current_model is not None:
+        del current_model
+        gc.collect()
+    
+    # Load new model
+    # device="cpu" and compute_type="int8" for CPU inference
+    try:
+        current_model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        current_model_size = model_size
+        return current_model
+    except Exception as e:
+        print(f"Error loading model {model_size}: {e}")
+        # Fallback to base if loading fails (e.g. invalid size)
+        if model_size != "base":
+            print("Falling back to 'base' model...")
+            return get_model("base")
+        raise e
 
 def format_timestamp(seconds: float) -> str:
     """Convert seconds to WebVTT timestamp format (HH:MM:SS.mmm)"""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int(round((seconds - int(seconds)) * 1000))
-    return f"{hours:02}:{minutes:02}:{secs:02}.{millis:03}"
+    secs = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
-def format_timestamp_srt(seconds: float) -> str:
-    """Convert seconds to SRT timestamp format (HH:MM:SS,mmm)"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int(round((seconds - int(seconds)) * 1000))
-    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
-
-def create_vtt(segments) -> str:
-    """Convert faster-whisper segments to WebVTT format string."""
-    vtt_output = ["WEBVTT\n"]
-    
+def create_vtt_content(segments) -> str:
+    """Create WebVTT content from segments"""
+    vtt_output = ["WEBVTT", ""]
     for segment in segments:
         start = format_timestamp(segment.start)
         end = format_timestamp(segment.end)
-        text = segment.text.strip()
-        
         vtt_output.append(f"{start} --> {end}")
-        vtt_output.append(f"{text}\n")
-        
+        vtt_output.append(segment.text.strip())
+        vtt_output.append("")
     return "\n".join(vtt_output)
 
-def create_srt(segments) -> str:
-    """Convert faster-whisper segments to SRT format string."""
+def create_srt_content(segments) -> str:
+    """Create SRT content from segments"""
     srt_output = []
-    
     for i, segment in enumerate(segments, start=1):
-        start = format_timestamp_srt(segment.start)
-        end = format_timestamp_srt(segment.end)
-        text = segment.text.strip()
-        
-        srt_output.append(f"{i}")
+        # SRT format: 00:00:00,000
+        start = format_timestamp(segment.start).replace('.', ',')
+        end = format_timestamp(segment.end).replace('.', ',')
+        srt_output.append(str(i))
         srt_output.append(f"{start} --> {end}")
-        srt_output.append(f"{text}\n")
+        srt_output.append(segment.text.strip())
+        srt_output.append("")
         
     return "\n".join(srt_output)
 
-def transcribe_video(video_path: str, progress_callback=None) -> str:
+def transcribe_video(video_path: str, progress_callback=None, model_size: str = "base") -> str:
     """
     Transcribes the video and returns the path to the generated VTT file.
     Also generates an SRT file in the same location.
@@ -59,8 +80,11 @@ def transcribe_video(video_path: str, progress_callback=None) -> str:
     Args:
         video_path: Path to the video file
         progress_callback: Optional function(progress_percent: float) to call during transcription
+        model_size: Whisper model size (tiny, base, small, medium, large)
     """
-    print(f"Transcribing {video_path}...")
+    print(f"Transcribing {video_path} using model '{model_size}'...")
+    
+    model = get_model(model_size)
     
     # faster-whisper returns a generator of segments
     segments, info = model.transcribe(video_path, beam_size=5)
@@ -92,7 +116,7 @@ def transcribe_video(video_path: str, progress_callback=None) -> str:
     print(f"Transcription complete. Total segments: {len(segments_list)}")
     
     # Generate VTT
-    vtt_content = create_vtt(segments_list)
+    vtt_content = create_vtt_content(segments_list)
     base_path = os.path.splitext(video_path)[0]
     vtt_path = f"{base_path}.vtt"
     
@@ -100,7 +124,7 @@ def transcribe_video(video_path: str, progress_callback=None) -> str:
         f.write(vtt_content)
         
     # Generate SRT
-    srt_content = create_srt(segments_list)
+    srt_content = create_srt_content(segments_list)
     srt_path = f"{base_path}.srt"
     
     with open(srt_path, "w", encoding="utf-8") as f:

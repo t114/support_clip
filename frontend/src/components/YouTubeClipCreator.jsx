@@ -3,6 +3,7 @@ import ClipPreview from './ClipPreview';
 
 function YouTubeClipCreator() {
     const [url, setUrl] = useState('');
+    const [modelSize, setModelSize] = useState('base');
     const [status, setStatus] = useState('idle'); // idle, downloading, analyzing, ready
     const [videoInfo, setVideoInfo] = useState(null);
     const [clips, setClips] = useState([]);
@@ -87,7 +88,7 @@ function YouTubeClipCreator() {
         const trimmedUrl = url.trim();
 
         setStatus('downloading');
-        setMessage('YouTube動画をダウンロード中... (これには時間がかかる場合があります)');
+        setMessage(`YouTube動画をダウンロード中... (モデル: ${modelSize})`);
 
         // Start polling for progress
         const videoId = extractVideoId(trimmedUrl);
@@ -126,7 +127,8 @@ function YouTubeClipCreator() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     url: trimmedUrl,
-                    with_comments: withComments
+                    with_comments: withComments,
+                    model_size: modelSize
                 })
             });
 
@@ -297,21 +299,32 @@ function YouTubeClipCreator() {
             <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
                 <h2 className="text-2xl font-bold mb-4">YouTube切り抜き作成</h2>
 
-                <div className="flex gap-2 mb-4">
+                <div className="flex gap-2">
                     <input
                         type="text"
                         value={url}
-                        onChange={handleUrlChange}
-                        placeholder="YouTube URLを入力 (例: https://www.youtube.com/watch?v=...)"
-                        className="flex-1 rounded-md border-gray-300 border p-2"
-                        disabled={status === 'downloading' || status === 'analyzing'}
+                        onChange={(e) => setUrl(e.target.value)}
+                        placeholder="YouTube URL (例: https://www.youtube.com/watch?v=...)"
+                        className="flex-1 p-2 border rounded"
                     />
+                    <select
+                        value={modelSize}
+                        onChange={(e) => setModelSize(e.target.value)}
+                        className="p-2 border rounded bg-white"
+                        title="文字起こしモデルのサイズ（精度と速度のトレードオフ）"
+                    >
+                        <option value="tiny">tiny (最速・低精度)</option>
+                        <option value="base">base (推奨・バランス)</option>
+                        <option value="small">small (高精度・遅い)</option>
+                        <option value="medium">medium (超高精度・激遅)</option>
+                        <option value="large">large (最高精度・激重)</option>
+                    </select>
                     <button
                         onClick={handleDownload}
-                        disabled={!url || status === 'downloading' || status === 'analyzing'}
-                        className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 disabled:bg-red-300"
+                        disabled={status === 'downloading' || !url}
+                        className="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 disabled:bg-gray-400"
                     >
-                        {status === 'downloading' ? 'ダウンロード中...' : '開始'}
+                        {status === 'downloading' ? '処理中...' : '開始'}
                     </button>
                 </div>
 
