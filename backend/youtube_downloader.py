@@ -151,6 +151,10 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
             'quiet': False,
             'no_warnings': False,
             'extract_flat': False,
+            'merge_output_format': 'mp4',  # Ensure output is mp4
+            'postprocessor_args': {
+                'ffmpeg': ['-c', 'copy']  # Use stream copy to avoid re-encoding
+            },
         }
         
         # コメント取得オプションはここでは設定しない（後で別に行う）

@@ -10,4 +10,5 @@ DEFAULT_MAX_CLIPS = 5
 
 # YouTube settings
 # Download best quality MP4, fallback to merging best video+audio, then any best format
-YOUTUBE_DOWNLOAD_FORMAT = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+# Download best quality MP4, fallback to merging best video+audio, then any best format
+YOUTUBE_DOWNLOAD_FORMAT = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
