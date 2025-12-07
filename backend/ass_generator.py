@@ -99,10 +99,14 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         # Calculate total outline width for outer layer
         total_outline = outline_width + outer_outline_width
         
+        # Calculate box padding for background - use minimum 8px for visibility
+        box_padding = max(outline_width, 8)
+        
         definitions = []
         
         # Style 1: Background Box (Layer 0)
-        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{outline_width},0,{alignment},10,10,{margin_v},1")
+        # BorderStyle 3 = opaque box, outline value acts as padding
+        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{box_padding},0,{alignment},10,10,{margin_v},1")
         
         # Style 2: Outer Outline (Layer 1)
         if outer_outline_width > 0:

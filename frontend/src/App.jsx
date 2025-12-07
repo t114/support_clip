@@ -30,6 +30,7 @@ function App() {
 
   // Saved Styles State
   const [savedStyles, setSavedStyles] = useState({});
+  const [defaultStyleName, setDefaultStyleName] = useState('');
 
   // Load saved styles from localStorage on mount
   useEffect(() => {
@@ -40,6 +41,10 @@ function App() {
       } catch (e) {
         console.error('Failed to parse saved styles', e);
       }
+    }
+    const defaultName = localStorage.getItem('defaultStyleName');
+    if (defaultName) {
+      setDefaultStyleName(defaultName);
     }
   }, []);
 
@@ -60,6 +65,20 @@ function App() {
     delete newSavedStyles[name];
     setSavedStyles(newSavedStyles);
     localStorage.setItem('savedStyles', JSON.stringify(newSavedStyles));
+    // Clear default if deleted
+    if (defaultStyleName === name) {
+      setDefaultStyleName('');
+      localStorage.removeItem('defaultStyleName');
+    }
+  };
+
+  const handleSetDefaultStyle = (name) => {
+    setDefaultStyleName(name);
+    if (name) {
+      localStorage.setItem('defaultStyleName', name);
+    } else {
+      localStorage.removeItem('defaultStyleName');
+    }
   };
 
   const handleUploadStart = () => {
@@ -233,6 +252,7 @@ function App() {
                     subtitles={subtitles}
                     styles={styles}
                     savedStyles={savedStyles}
+                    defaultStyleName={defaultStyleName}
                     onTimeUpdate={setCurrentTime}
                   />
 
@@ -243,6 +263,8 @@ function App() {
                     onSave={handleSaveStyle}
                     onLoad={handleLoadStyle}
                     onDelete={handleDeleteStyle}
+                    defaultStyleName={defaultStyleName}
+                    onSetDefault={handleSetDefaultStyle}
                   />
 
                   <div className="text-center pt-4 flex justify-center space-x-4 flex-wrap gap-y-2">

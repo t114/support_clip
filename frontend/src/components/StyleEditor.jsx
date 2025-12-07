@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave, onLoad, onDelete }) {
+export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave, onLoad, onDelete, defaultStyleName, onSetDefault }) {
     const [styleName, setStyleName] = React.useState('');
 
     const handleChange = (key, value) => {
@@ -65,7 +65,16 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
                         <label className="block text-xs text-gray-600">保存済みスタイル:</label>
                         <div className="flex flex-wrap gap-2">
                             {Object.keys(savedStyles).map(name => (
-                                <div key={name} className="flex items-center bg-white border border-gray-300 rounded px-2 py-1 text-sm">
+                                <div
+                                    key={name}
+                                    className={`flex items-center border rounded px-2 py-1 text-sm ${defaultStyleName === name
+                                            ? 'bg-blue-100 border-blue-400'
+                                            : 'bg-white border-gray-300'
+                                        }`}
+                                >
+                                    {defaultStyleName === name && (
+                                        <span className="text-blue-600 mr-1 text-xs">★</span>
+                                    )}
                                     <span
                                         className="cursor-pointer hover:text-blue-600 mr-2"
                                         onClick={() => {
@@ -75,6 +84,18 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
                                     >
                                         {name}
                                     </span>
+                                    {onSetDefault && (
+                                        <button
+                                            onClick={() => onSetDefault(defaultStyleName === name ? '' : name)}
+                                            className={`text-xs mr-1 ${defaultStyleName === name
+                                                    ? 'text-blue-600 hover:text-blue-800'
+                                                    : 'text-gray-400 hover:text-blue-600'
+                                                }`}
+                                            title={defaultStyleName === name ? 'デフォルト解除' : 'デフォルトに設定'}
+                                        >
+                                            {defaultStyleName === name ? '★' : '☆'}
+                                        </button>
+                                    )}
                                     <button
                                         onClick={() => onDelete(name)}
                                         className="text-red-500 hover:text-red-700 text-xs"

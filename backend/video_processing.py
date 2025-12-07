@@ -40,11 +40,14 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path):
     # subtitles filter needs escaped path: \: and \\
     escaped_ass_path = ass_path.replace(":", "\\:").replace("'", "\\'")
     
+    # Use subtitles filter with fontsdir for emoji support
+    # The force_style option allows overriding font but ASS styles take precedence for most settings
+    # Using fontsdir ensures ffmpeg can find emoji fonts
     cmd = [
         "ffmpeg",
         "-y", # Overwrite
         "-i", video_path,
-        "-vf", f"subtitles='{escaped_ass_path}'",
+        "-vf", f"subtitles='{escaped_ass_path}':fontsdir=/usr/share/fonts/",
         "-c:a", "copy", # Copy audio
         output_path
     ]

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 
-export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, onTimeUpdate }) {
+export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, defaultStyleName, onTimeUpdate }) {
     const videoRef = useRef(null);
 
     const [activeSubtitles, setActiveSubtitles] = React.useState([]);
@@ -19,9 +19,15 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
 
     // Helper function to get style for a subtitle
     const getStyleForSub = (sub) => {
+        // If subtitle has explicit style, use it
         if (sub && sub.styleName && savedStyles && savedStyles[sub.styleName]) {
             return savedStyles[sub.styleName];
         }
+        // If defaultStyleName is set and exists in savedStyles, use it
+        if (defaultStyleName && savedStyles && savedStyles[defaultStyleName]) {
+            return savedStyles[defaultStyleName];
+        }
+        // Otherwise use current styles
         return styles;
     };
 
