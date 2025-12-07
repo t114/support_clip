@@ -3,7 +3,7 @@ import React, { useRef, useEffect } from 'react';
 export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, onTimeUpdate }) {
     const videoRef = useRef(null);
 
-    const [activeSub, setActiveSub] = React.useState(null);
+    const [activeSubtitles, setActiveSubtitles] = React.useState([]);
     const [scale, setScale] = React.useState(1); // Scale factor relative to 1080p
 
     const handleTimeUpdate = () => {
@@ -11,16 +11,19 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
             const time = videoRef.current.currentTime;
             onTimeUpdate(time);
 
-            // Find active subtitle
-            const sub = subtitles.find(s => time >= s.start && time <= s.end);
-            setActiveSub(sub);
+            // Find all active subtitles (filter instead of find)
+            const subs = subtitles.filter(s => time >= s.start && time <= s.end);
+            setActiveSubtitles(subs);
         }
     };
 
-    // Determine current style to use
-    const currentStyle = (activeSub && activeSub.styleName && savedStyles && savedStyles[activeSub.styleName])
-        ? savedStyles[activeSub.styleName]
-        : styles;
+    // Helper function to get style for a subtitle
+    const getStyleForSub = (sub) => {
+        if (sub && sub.styleName && savedStyles && savedStyles[sub.styleName]) {
+            return savedStyles[sub.styleName];
+        }
+        return styles;
+    };
 
     // Helper to check if background is transparent
     const isTransparent = (color) => {
@@ -32,12 +35,12 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
         return false; // Assume opaque if #RRGGBB
     };
 
-    // Update activeSub when subtitles change (e.g. text edit or style change) while paused
+    // Update activeSubtitles when subtitles change (e.g. text edit or style change) while paused
     useEffect(() => {
         if (videoRef.current) {
             const time = videoRef.current.currentTime;
-            const sub = subtitles.find(sub => time >= sub.start && time <= sub.end);
-            setActiveSub(sub || null);
+            const subs = subtitles.filter(sub => time >= sub.start && time <= sub.end);
+            setActiveSubtitles(subs);
         }
     }, [subtitles]);
 
@@ -75,12 +78,12 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
     }, []);
 
     // Build text shadow for double outline and drop shadow
-    const buildTextShadow = () => {
+    const buildTextShadow = (subStyle) => {
         const shadows = [];
 
         // Inner outline (using text-shadow to create outline effect)
-        const innerWidth = (currentStyle.outlineWidth || 0) * scale;
-        const innerColor = currentStyle.outlineColor || '#000000';
+        const innerWidth = (subStyle.outlineWidth || 0) * scale;
+        const innerColor = subStyle.outlineColor || '#000000';
         if (innerWidth > 0) {
             // Create outline using multiple shadows
             for (let angle = 0; angle < 360; angle += 45) {
@@ -92,8 +95,8 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
         }
 
         // Outer outline
-        const outerWidth = (currentStyle.outerOutlineWidth || 0) * scale;
-        const outerColor = currentStyle.outerOutlineColor || '#FFFFFF';
+        const outerWidth = (subStyle.outerOutlineWidth || 0) * scale;
+        const outerColor = subStyle.outerOutlineColor || '#FFFFFF';
         if (outerWidth > 0) {
             const totalWidth = innerWidth + outerWidth;
             for (let angle = 0; angle < 360; angle += 45) {
@@ -105,10 +108,10 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
         }
 
         // Drop shadow
-        const shadowBlur = (currentStyle.shadowBlur || 0) * scale;
-        const shadowX = (currentStyle.shadowOffsetX || 0) * scale;
-        const shadowY = (currentStyle.shadowOffsetY || 0) * scale;
-        const shadowColor = currentStyle.shadowColor || '#000000';
+        const shadowBlur = (subStyle.shadowBlur || 0) * scale;
+        const shadowX = (subStyle.shadowOffsetX || 0) * scale;
+        const shadowY = (subStyle.shadowOffsetY || 0) * scale;
+        const shadowColor = subStyle.shadowColor || '#000000';
         if (shadowBlur > 0 || shadowX !== 0 || shadowY !== 0) {
             shadows.push(`${shadowX}px ${shadowY}px ${shadowBlur}px ${shadowColor}`);
         }
@@ -150,31 +153,52 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
                 お使いのブラウザは動画タグをサポートしていません。
             </video>
 
-            {/* Custom Subtitle Overlay */}
-            {activeSub && (
-                <div
-                    className="absolute left-0 right-0 text-center pointer-events-none transition-all duration-200"
-                    style={{
-                        bottom: `${currentStyle.bottom}%`,
-                    }}
-                >
-                    <span
+            {/* Custom Subtitle Overlay - Renders ALL active subtitles */}
+            {activeSubtitles.map((sub) => {
+                const subStyle = getStyleForSub(sub);
+                // Map alignment to CSS properties
+                const alignmentStyles = {
+                    'left': { textAlign: 'left', justifyContent: 'flex-start', paddingLeft: '5%' },
+                    'center': { textAlign: 'center', justifyContent: 'center' },
+                    'right': { textAlign: 'right', justifyContent: 'flex-end', paddingRight: '5%' },
+                    'top-left': { textAlign: 'left', justifyContent: 'flex-start', paddingLeft: '5%' },
+                    'top': { textAlign: 'center', justifyContent: 'center' },
+                    'top-right': { textAlign: 'right', justifyContent: 'flex-end', paddingRight: '5%' },
+                };
+                const alignment = subStyle.alignment || 'center';
+                const alignStyle = alignmentStyles[alignment] || alignmentStyles.center;
+                const isTop = alignment.startsWith('top');
+
+                return (
+                    <div
+                        key={sub.id}
+                        className="absolute left-0 right-0 flex pointer-events-none transition-all duration-200"
                         style={{
-                            fontFamily: currentStyle.fontFamily || 'Noto Sans JP',
-                            fontSize: `${currentStyle.fontSize * scale}px`,
-                            color: currentStyle.color,
-                            backgroundColor: currentStyle.backgroundColor,
-                            textShadow: buildTextShadow(),
-                            fontWeight: currentStyle.fontWeight || 'normal',
-                            padding: `${4 * scale}px ${12 * scale}px`,
-                            borderRadius: `${4 * scale}px`,
-                            whiteSpace: 'pre-wrap',
+                            ...(isTop
+                                ? { top: `${100 - (subStyle.bottom || 10)}%` }
+                                : { bottom: `${subStyle.bottom || 10}%` }
+                            ),
+                            ...alignStyle,
                         }}
                     >
-                        {activeSub.text}
-                    </span>
-                </div>
-            )}
+                        <span
+                            style={{
+                                fontFamily: subStyle.fontFamily || 'Noto Sans JP',
+                                fontSize: `${subStyle.fontSize * scale}px`,
+                                color: subStyle.color,
+                                backgroundColor: subStyle.backgroundColor,
+                                textShadow: buildTextShadow(subStyle),
+                                fontWeight: subStyle.fontWeight || 'normal',
+                                padding: `${4 * scale}px ${12 * scale}px`,
+                                borderRadius: `${4 * scale}px`,
+                                whiteSpace: 'pre-wrap',
+                            }}
+                        >
+                            {subStyle.prefix && `${subStyle.prefix} `}{sub.text}
+                        </span>
+                    </div>
+                );
+            })}
 
             {/* Thumbnail Capture Button */}
             <button

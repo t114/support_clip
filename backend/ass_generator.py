@@ -82,24 +82,38 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         # MarginV calculation (approximate)
         margin_v = int(style_obj.get('bottom', 10) * 7)
         
+        # Alignment: 1=left, 2=center, 3=right (bottom row)
+        # Add 4 for middle row, add 8 for top row
+        # So: 1,2,3=bottom; 5,6,7=middle; 9,10,11=top (but 4,5,6 and 7,8,9 in SSA)
+        # ASS uses numpad layout: 1-9 corresponding to screen positions
+        alignment_map = {
+            'left': 1,      # bottom-left
+            'center': 2,    # bottom-center
+            'right': 3,     # bottom-right
+            'top-left': 7,  # top-left
+            'top': 8,       # top-center  
+            'top-right': 9, # top-right
+        }
+        alignment = alignment_map.get(style_obj.get('alignment', 'center'), 2)
+        
         # Calculate total outline width for outer layer
         total_outline = outline_width + outer_outline_width
         
         definitions = []
         
         # Style 1: Background Box (Layer 0)
-        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{outline_width},0,2,10,10,{margin_v},1")
+        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{outline_width},0,{alignment},10,10,{margin_v},1")
         
         # Style 2: Outer Outline (Layer 1)
         if outer_outline_width > 0:
-            definitions.append(f"Style: {name}_Outer,{ass_font_family},{font_size},{outer_outline_color},&H00000000,{outer_outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{total_outline},{shadow_blur},2,10,10,{margin_v},1")
+            definitions.append(f"Style: {name}_Outer,{ass_font_family},{font_size},{outer_outline_color},&H00000000,{outer_outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{total_outline},{shadow_blur},{alignment},10,10,{margin_v},1")
         
         # Style 3: Inner Outline (Layer 2)
         shadow_value = shadow_blur if outer_outline_width == 0 else 0
-        definitions.append(f"Style: {name}_Inner,{ass_font_family},{font_size},{primary_color},&H00000000,{outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{outline_width},{shadow_value},2,10,10,{margin_v},1")
+        definitions.append(f"Style: {name}_Inner,{ass_font_family},{font_size},{primary_color},&H00000000,{outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{outline_width},{shadow_value},{alignment},10,10,{margin_v},1")
         
         # Style 4: Text (Layer 3)
-        definitions.append(f"Style: {name}_Text,{ass_font_family},{font_size},{primary_color},&H00000000,&H00000000,&H00000000,{bold},0,0,0,100,100,0,0,1,0,0,2,10,10,{margin_v},1")
+        definitions.append(f"Style: {name}_Text,{ass_font_family},{font_size},{primary_color},&H00000000,&H00000000,&H00000000,{bold},0,0,0,100,100,0,0,1,0,0,{alignment},10,10,{margin_v},1")
         
         return definitions, outer_outline_width > 0
 
@@ -181,6 +195,7 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         # Determine style for this event
         style_name = "Default"
         has_outer = default_has_outer
+        prefix = ""
         
         # Check style map (index is string in JSON keys usually)
         if style_map and str(i) in style_map:
@@ -190,22 +205,27 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
             if saved_styles and mapped_name in saved_styles:
                 style_name = safe_mapped_name
                 has_outer = saved_style_has_outer.get(safe_mapped_name, False)
+                # Get prefix from style
+                prefix = saved_styles[mapped_name].get('prefix', '')
+        
+        # Add prefix to text if exists
+        display_text = f"{prefix} {event['text']}" if prefix else event['text']
         
         # Layer 0: Box
         # Check background alpha from style object
         # We need to look up the style object again or parse from generated line...
         # Simpler: assume box is always generated but visibility depends on alpha in style def
-        ass_lines.append(f"Dialogue: 0,{event['start']},{event['end']},{style_name}_Box,,0,0,0,,{event['text']}")
+        ass_lines.append(f"Dialogue: 0,{event['start']},{event['end']},{style_name}_Box,,0,0,0,,{display_text}")
         
         # Layer 1: Outer Outline
         if has_outer:
-            ass_lines.append(f"Dialogue: 1,{event['start']},{event['end']},{style_name}_Outer,,0,0,0,,{event['text']}")
+            ass_lines.append(f"Dialogue: 1,{event['start']},{event['end']},{style_name}_Outer,,0,0,0,,{display_text}")
         
         # Layer 2: Inner Outline
-        ass_lines.append(f"Dialogue: 2,{event['start']},{event['end']},{style_name}_Inner,,0,0,0,,{event['text']}")
+        ass_lines.append(f"Dialogue: 2,{event['start']},{event['end']},{style_name}_Inner,,0,0,0,,{display_text}")
         
         # Layer 3: Text
-        ass_lines.append(f"Dialogue: 3,{event['start']},{event['end']},{style_name}_Text,,0,0,0,,{event['text']}")
+        ass_lines.append(f"Dialogue: 3,{event['start']},{event['end']},{style_name}_Text,,0,0,0,,{display_text}")
         
     # Write to file
     with open(output_path, 'w', encoding='utf-8') as f:

@@ -90,6 +90,17 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
 
             <div className="grid grid-cols-2 gap-4">
                 <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">プレフィックス</label>
+                    <input
+                        type="text"
+                        value={styles.prefix || ''}
+                        onChange={(e) => handleChange('prefix', e.target.value)}
+                        placeholder="例: 💬"
+                        className="w-full border border-gray-300 rounded px-2 py-1"
+                    />
+                </div>
+
+                <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">文字サイズ (px)</label>
                     <input
                         type="number"
@@ -107,6 +118,22 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
                         onChange={(e) => handleChange('bottom', Number(e.target.value))}
                         className="w-full border border-gray-300 rounded px-2 py-1"
                     />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">水平位置</label>
+                    <select
+                        value={styles.alignment || 'center'}
+                        onChange={(e) => handleChange('alignment', e.target.value)}
+                        className="w-full border border-gray-300 rounded px-2 py-1"
+                    >
+                        <option value="left">左寄せ</option>
+                        <option value="center">中央</option>
+                        <option value="right">右寄せ</option>
+                        <option value="top-left">上部・左</option>
+                        <option value="top">上部・中央</option>
+                        <option value="top-right">上部・右</option>
+                    </select>
                 </div>
 
                 <div>
