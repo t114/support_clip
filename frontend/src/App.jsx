@@ -117,6 +117,23 @@ function App() {
     try {
       const vttContent = stringifyVTT(subtitles);
 
+      // Determine the default style: use the saved default style if set, otherwise use a clean basic style
+      let defaultStyle;
+      if (defaultStyleName && savedStyles[defaultStyleName]) {
+        defaultStyle = savedStyles[defaultStyleName];
+      } else {
+        // Use a clean basic style without any prefix settings
+        defaultStyle = {
+          fontSize: 24,
+          color: '#ffffff',
+          backgroundColor: '#00000080',
+          bottom: 10,
+          outlineColor: '#000000',
+          outlineWidth: 0,
+          fontWeight: 'normal',
+        };
+      }
+
       const response = await fetch('/burn', {
         method: 'POST',
         headers: {
@@ -125,7 +142,7 @@ function App() {
         body: JSON.stringify({
           video_filename: videoData.unique_filename,
           subtitle_content: vttContent,
-          styles: styles,
+          styles: defaultStyle,
           saved_styles: savedStyles,
           style_map: subtitles.reduce((acc, sub, index) => {
             if (sub.styleName) {

@@ -98,26 +98,39 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         
         # Calculate total outline width for outer layer
         total_outline = outline_width + outer_outline_width
-        
+
         # Calculate box padding for background - use minimum 8px for visibility
         box_padding = max(outline_width, 8)
-        
+
+        # Calculate horizontal margins based on alignment
+        # For PlayResX=1920, base margin is 5% = 96px
+        # For left/right alignment, add extra margin to ensure text doesn't touch edges
+        if alignment in [1, 7]:  # left, top-left
+            margin_l = 150  # ~8% from left edge
+            margin_r = 96
+        elif alignment in [3, 9]:  # right, top-right
+            margin_l = 96
+            margin_r = 150  # ~8% from right edge
+        else:  # center
+            margin_l = 96
+            margin_r = 96
+
         definitions = []
-        
+
         # Style 1: Background Box (Layer 0)
         # BorderStyle 3 = opaque box, outline value acts as padding
-        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{box_padding},0,{alignment},10,10,{margin_v},1")
-        
+        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{box_padding},0,{alignment},{margin_l},{margin_r},{margin_v},1")
+
         # Style 2: Outer Outline (Layer 1)
         if outer_outline_width > 0:
-            definitions.append(f"Style: {name}_Outer,{ass_font_family},{font_size},{outer_outline_color},&H00000000,{outer_outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{total_outline},{shadow_blur},{alignment},10,10,{margin_v},1")
-        
+            definitions.append(f"Style: {name}_Outer,{ass_font_family},{font_size},{outer_outline_color},&H00000000,{outer_outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{total_outline},{shadow_blur},{alignment},{margin_l},{margin_r},{margin_v},1")
+
         # Style 3: Inner Outline (Layer 2)
         shadow_value = shadow_blur if outer_outline_width == 0 else 0
-        definitions.append(f"Style: {name}_Inner,{ass_font_family},{font_size},{primary_color},&H00000000,{outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{outline_width},{shadow_value},{alignment},10,10,{margin_v},1")
-        
+        definitions.append(f"Style: {name}_Inner,{ass_font_family},{font_size},{primary_color},&H00000000,{outline_color},{shadow_color},{bold},0,0,0,100,100,0,0,1,{outline_width},{shadow_value},{alignment},{margin_l},{margin_r},{margin_v},1")
+
         # Style 4: Text (Layer 3)
-        definitions.append(f"Style: {name}_Text,{ass_font_family},{font_size},{primary_color},&H00000000,&H00000000,&H00000000,{bold},0,0,0,100,100,0,0,1,0,0,{alignment},10,10,{margin_v},1")
+        definitions.append(f"Style: {name}_Text,{ass_font_family},{font_size},{primary_color},&H00000000,&H00000000,&H00000000,{bold},0,0,0,100,100,0,0,1,0,0,{alignment},{margin_l},{margin_r},{margin_v},1")
         
         return definitions, outer_outline_width > 0
 
@@ -200,7 +213,7 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         style_name = "Default"
         has_outer = default_has_outer
         prefix = ""
-        
+
         # Check style map (index is string in JSON keys usually)
         if style_map and str(i) in style_map:
             mapped_name = style_map[str(i)]
@@ -210,26 +223,37 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
                 style_name = safe_mapped_name
                 has_outer = saved_style_has_outer.get(safe_mapped_name, False)
                 # Get prefix from style
-                prefix = saved_styles[mapped_name].get('prefix', '')
-        
+                # If image prefix exists, don't add text prefix (image will be overlaid by FFmpeg)
+                if saved_styles[mapped_name].get('prefixImage'):
+                    # Image prefix exists, don't use text prefix
+                    prefix = ''
+                else:
+                    # No image prefix, use text prefix
+                    prefix = saved_styles[mapped_name].get('prefix', '')
+        else:
+            # Default style
+            # If image prefix exists, don't add text prefix (image will be overlaid by FFmpeg)
+            if styles.get('prefixImage'):
+                prefix = ''
+            else:
+                prefix = styles.get('prefix', '')
+
         # Add prefix to text if exists
         display_text = f"{prefix} {event['text']}" if prefix else event['text']
-        
+
         # Layer 0: Box
-        # Check background alpha from style object
-        # We need to look up the style object again or parse from generated line...
-        # Simpler: assume box is always generated but visibility depends on alpha in style def
-        ass_lines.append(f"Dialogue: 0,{event['start']},{event['end']},{style_name}_Box,,0,0,0,,{display_text}")
-        
+        # Use empty MarginL/R/V to inherit from style definition
+        ass_lines.append(f"Dialogue: 0,{event['start']},{event['end']},{style_name}_Box,,,,,,{display_text}")
+
         # Layer 1: Outer Outline
         if has_outer:
-            ass_lines.append(f"Dialogue: 1,{event['start']},{event['end']},{style_name}_Outer,,0,0,0,,{display_text}")
-        
+            ass_lines.append(f"Dialogue: 1,{event['start']},{event['end']},{style_name}_Outer,,,,,,{display_text}")
+
         # Layer 2: Inner Outline
-        ass_lines.append(f"Dialogue: 2,{event['start']},{event['end']},{style_name}_Inner,,0,0,0,,{display_text}")
-        
+        ass_lines.append(f"Dialogue: 2,{event['start']},{event['end']},{style_name}_Inner,,,,,,{display_text}")
+
         # Layer 3: Text
-        ass_lines.append(f"Dialogue: 3,{event['start']},{event['end']},{style_name}_Text,,0,0,0,,{display_text}")
+        ass_lines.append(f"Dialogue: 3,{event['start']},{event['end']},{style_name}_Text,,,,,,{display_text}")
         
     # Write to file
     with open(output_path, 'w', encoding='utf-8') as f:

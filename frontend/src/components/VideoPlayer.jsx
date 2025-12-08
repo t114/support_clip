@@ -187,6 +187,20 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
                             ...alignStyle,
                         }}
                     >
+                        {/* Image Prefix - placed OUTSIDE the text span */}
+                        {subStyle.prefixImage && (
+                            <img
+                                src={subStyle.prefixImage}
+                                alt="prefix"
+                                style={{
+                                    height: `${(subStyle.prefixImageSize || 32) * scale}px`,
+                                    width: 'auto',
+                                    display: 'inline-block',
+                                    marginRight: `${10 * scale}px`, // 10px spacing
+                                    alignSelf: 'center',
+                                }}
+                            />
+                        )}
                         <span
                             style={{
                                 fontFamily: subStyle.fontFamily || 'Noto Sans JP',
@@ -200,7 +214,10 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
                                 whiteSpace: 'pre-wrap',
                             }}
                         >
-                            {subStyle.prefix && `${subStyle.prefix} `}{sub.text}
+                            {/* Text Prefix (only if no image prefix) */}
+                            {(subStyle.prefixImage === null || subStyle.prefixImage === undefined) && subStyle.prefix && `${subStyle.prefix} `}
+                            {/* Subtitle Text */}
+                            {sub.text}
                         </span>
                     </div>
                 );

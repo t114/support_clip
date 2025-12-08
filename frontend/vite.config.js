@@ -9,6 +9,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/upload': 'http://127.0.0.1:8000',
+      '/upload-prefix-image': 'http://127.0.0.1:8000',
+      '/delete-prefix-image': 'http://127.0.0.1:8000',
       '/burn': 'http://127.0.0.1:8000',
       '/download': 'http://127.0.0.1:8000',
       '/static': 'http://127.0.0.1:8000',

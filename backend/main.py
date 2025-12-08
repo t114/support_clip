@@ -27,6 +27,10 @@ app.add_middleware(
 UPLOAD_DIR = "backend/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Ensure prefix images directory exists
+PREFIX_IMAGES_DIR = os.path.join(UPLOAD_DIR, "prefix_images")
+os.makedirs(PREFIX_IMAGES_DIR, exist_ok=True)
+
 # Mount static files to serve uploaded videos and generated subtitles
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
 
@@ -106,29 +110,52 @@ async def burn_subtitles(request: BurnRequest):
         video_path = os.path.join(UPLOAD_DIR, request.video_filename)
         if not os.path.exists(video_path):
             raise HTTPException(status_code=404, detail="Video not found")
-            
+
+        # Clean up styles: if prefixImage is set, clear the prefix text
+        cleaned_styles = dict(request.styles)
+        if cleaned_styles.get('prefixImage'):
+            cleaned_styles['prefix'] = ''
+
+        cleaned_saved_styles = None
+        if request.saved_styles:
+            cleaned_saved_styles = {}
+            for name, style in request.saved_styles.items():
+                cleaned_style = dict(style)
+                if cleaned_style.get('prefixImage'):
+                    cleaned_style['prefix'] = ''
+                cleaned_saved_styles[name] = cleaned_style
+
         # Save temporary VTT
         base_name = os.path.splitext(request.video_filename)[0]
         vtt_path = os.path.join(UPLOAD_DIR, f"{base_name}_modified.vtt")
         with open(vtt_path, "w", encoding="utf-8") as f:
             f.write(request.subtitle_content)
-            
+
         # Generate ASS file with styles
         ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_modified.ass")
         generate_ass(
-            vtt_path, 
-            request.styles, 
+            vtt_path,
+            cleaned_styles,
             ass_path,
-            saved_styles=request.saved_styles,
+            saved_styles=cleaned_saved_styles,
             style_map=request.style_map
         )
-        
-        # Burn subtitles
+
+        # Burn subtitles (now with image prefix support)
         output_filename = f"{base_name}_burned.mp4"
         output_path = os.path.join(UPLOAD_DIR, output_filename)
-        
-        burn_subtitles_with_ffmpeg(video_path, ass_path, output_path)
-        
+
+        burn_subtitles_with_ffmpeg(
+            video_path,
+            ass_path,
+            output_path,
+            vtt_path=vtt_path,
+            saved_styles=cleaned_saved_styles,
+            style_map=request.style_map,
+            default_style=cleaned_styles,
+            upload_dir=UPLOAD_DIR
+        )
+
         return {"filename": output_filename}
     except Exception as e:
         logger.error(f"Error burning subtitles: {e}")
@@ -497,6 +524,59 @@ async def evaluate_clip(request: EvaluateClipRequest):
 @app.get("/")
 async def root():
     return {"message": "Video Transcription API is running"}
+
+@app.post("/upload-prefix-image")
+async def upload_prefix_image(file: UploadFile = File(...)):
+    """Upload a prefix image for subtitle styles"""
+    try:
+        # Validate file type
+        allowed_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+        file_extension = os.path.splitext(file.filename)[1].lower()
+
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
+            )
+
+        # Generate unique filename
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(PREFIX_IMAGES_DIR, unique_filename)
+
+        # Save uploaded file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Return URL relative to the static mount
+        image_url = f"/static/prefix_images/{unique_filename}"
+
+        return {
+            "success": True,
+            "image_url": image_url,
+            "filename": unique_filename
+        }
+
+    except Exception as e:
+        logger.error(f"Error uploading prefix image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete-prefix-image/{filename}")
+async def delete_prefix_image(filename: str):
+    """Delete a prefix image"""
+    try:
+        # Security: Only allow deletion from prefix_images directory
+        file_path = os.path.join(PREFIX_IMAGES_DIR, os.path.basename(filename))
+
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        os.remove(file_path)
+
+        return {"success": True, "message": "Image deleted"}
+
+    except Exception as e:
+        logger.error(f"Error deleting prefix image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/test-clip-detector")
 async def test_clip_detector():

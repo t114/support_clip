@@ -110,15 +110,119 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">プレフィックス</label>
-                    <input
-                        type="text"
-                        value={styles.prefix || ''}
-                        onChange={(e) => handleChange('prefix', e.target.value)}
-                        placeholder="例: 💬"
-                        className="w-full border border-gray-300 rounded px-2 py-1"
-                    />
+                <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">プレフィックス</label>
+                    <div className="space-y-2">
+                        {/* Text or Image Toggle */}
+                        <div className="flex gap-4">
+                            <label className="flex items-center cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="prefixType"
+                                    checked={styles.prefixImage === null || styles.prefixImage === undefined}
+                                    onChange={() => handleChange('prefixImage', null)}
+                                    className="mr-2"
+                                />
+                                <span className="text-sm">テキスト</span>
+                            </label>
+                            <label className="flex items-center cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="prefixType"
+                                    checked={styles.prefixImage !== null && styles.prefixImage !== undefined}
+                                    onChange={() => {
+                                        // Update both properties at once to avoid state update conflicts
+                                        onStyleChange({ ...styles, prefixImage: '', prefix: '' });
+                                    }}
+                                    className="mr-2"
+                                />
+                                <span className="text-sm">画像</span>
+                            </label>
+                        </div>
+
+                        {/* Text Prefix Input */}
+                        {(styles.prefixImage === null || styles.prefixImage === undefined) && (
+                            <input
+                                type="text"
+                                value={styles.prefix || ''}
+                                onChange={(e) => handleChange('prefix', e.target.value)}
+                                placeholder="例: 💬"
+                                className="w-full border border-gray-300 rounded px-2 py-1"
+                            />
+                        )}
+
+                        {/* Image Upload */}
+                        {(styles.prefixImage !== null && styles.prefixImage !== undefined) && (
+                            <div className="space-y-2">
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+
+                                        // Upload to backend
+                                        const formData = new FormData();
+                                        formData.append('file', file);
+
+                                        try {
+                                            const response = await fetch('/upload-prefix-image', {
+                                                method: 'POST',
+                                                body: formData,
+                                            });
+
+                                            if (!response.ok) {
+                                                throw new Error('Upload failed');
+                                            }
+
+                                            const data = await response.json();
+                                            // Update both properties at once
+                                            onStyleChange({ ...styles, prefixImage: data.image_url, prefix: '' });
+                                        } catch (error) {
+                                            console.error('Error uploading image:', error);
+                                            alert('画像のアップロードに失敗しました');
+                                        }
+                                    }}
+                                    className="w-full text-sm"
+                                />
+
+                                {/* Image Size Controls */}
+                                <div className="flex items-center gap-2">
+                                    <label className="text-xs text-gray-600">サイズ:</label>
+                                    <input
+                                        type="number"
+                                        value={styles.prefixImageSize || 32}
+                                        onChange={(e) => handleChange('prefixImageSize', Number(e.target.value))}
+                                        min="16"
+                                        max="128"
+                                        className="border border-gray-300 rounded px-2 py-1 w-20 text-sm"
+                                    />
+                                    <span className="text-xs text-gray-500">px</span>
+                                </div>
+
+                                {/* Image Preview */}
+                                {styles.prefixImage && (
+                                    <div className="flex items-center gap-2">
+                                        <img
+                                            src={styles.prefixImage}
+                                            alt="Prefix"
+                                            style={{ height: `${styles.prefixImageSize || 32}px`, width: 'auto' }}
+                                            className="border border-gray-300 rounded"
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                // Clear image but stay in image mode
+                                                handleChange('prefixImage', '');
+                                            }}
+                                            className="text-red-500 hover:text-red-700 text-xs"
+                                        >
+                                            画像削除
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 <div>
