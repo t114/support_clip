@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import ClipPreview from './ClipPreview';
+import DescriptionModal from './DescriptionModal';
 
 function YouTubeClipCreator() {
     const [url, setUrl] = useState('');
@@ -20,6 +21,11 @@ function YouTubeClipCreator() {
     const [creatingClipId, setCreatingClipId] = useState(null);
     const [startTime, setStartTime] = useState(0);
     const [withComments, setWithComments] = useState(false);
+
+    // Description modal state
+    const [isDescriptionModalOpen, setIsDescriptionModalOpen] = useState(false);
+    const [generatedDescription, setGeneratedDescription] = useState('');
+    const [detectedMembers, setDetectedMembers] = useState([]);
 
     // YouTube URLからt=パラメータを抽出
     const extractStartTimeFromUrl = (url) => {
@@ -144,26 +150,15 @@ function YouTubeClipCreator() {
             setVttUrl(data.subtitle_url);
             setSrtUrl(data.srt_url);
             setFcpxmlUrl(data.fcpxml_url);
-            setVttFilename(data.subtitle_url.split('/').pop()); // Extract filename
+
+            // subtitle_urlがnullでない場合のみfilenameを設定
+            if (data.subtitle_url) {
+                setVttFilename(data.subtitle_url.split('/').pop());
+            }
 
             // バックエンドから返されたstart_timeを使用（URLから抽出済み）
             if (data.start_time !== undefined && data.start_time > 0) {
                 setStartTime(data.start_time);
-            }
-
-            setStatus('analyzing');
-
-            // キャッシュ使用時のメッセージ
-            if (data.cached) {
-                let msg = '✓ キャッシュされた動画を使用しています（ダウンロードをスキップ）。';
-                if (withComments && !data.has_comments) {
-                    msg += ' コメントデータをダウンロード中...';
-                } else {
-                    msg += ' AIが切り抜き箇所を探しています...';
-                }
-                setMessage(msg);
-            } else {
-                setMessage('AIが動画を分析して切り抜き箇所を探しています...');
             }
 
             // Reset analysis state
@@ -171,8 +166,30 @@ function YouTubeClipCreator() {
             setAnalysisOffset(0);
             setHasMore(false);
 
-            // Auto-start analysis
-            analyzeVideo(data.subtitle_url.split('/').pop(), 0);
+            // 字幕がない場合（文字起こしをスキップした場合）
+            if (!data.subtitle_url) {
+                setStatus('ready');
+                setMessage('✓ 動画のダウンロードが完了しました。字幕ファイルをアップロードしてください。');
+            } else {
+                // 字幕がある場合は自動的に分析開始
+                setStatus('analyzing');
+
+                // キャッシュ使用時のメッセージ
+                if (data.cached) {
+                    let msg = '✓ キャッシュされた動画を使用しています（ダウンロードをスキップ）。';
+                    if (withComments && !data.has_comments) {
+                        msg += ' コメントデータをダウンロード中...';
+                    } else {
+                        msg += ' AIが切り抜き箇所を探しています...';
+                    }
+                    setMessage(msg);
+                } else {
+                    setMessage('AIが動画を分析して切り抜き箇所を探しています...');
+                }
+
+                // Auto-start analysis
+                analyzeVideo(data.subtitle_url.split('/').pop(), 0);
+            }
 
         } catch (e) {
             console.error(e);
@@ -257,6 +274,39 @@ function YouTubeClipCreator() {
         setClips(clips.filter(c => c.id !== id));
     };
 
+    const generateDescription = async () => {
+        try {
+            if (!videoInfo) {
+                alert('動画情報がありません');
+                return;
+            }
+
+            const response = await fetch('/generate-description', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    original_url: url,
+                    original_title: videoInfo.title || '',
+                    video_description: videoInfo.description || '',
+                    clip_title: null
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            setGeneratedDescription(data.description);
+            setDetectedMembers(data.detected_members || []);
+            setIsDescriptionModalOpen(true);
+        } catch (error) {
+            console.error('Error generating description:', error);
+            alert(`概要欄の生成に失敗しました: ${error.message}`);
+        }
+    };
+
     const createClip = async (clip) => {
         try {
             setCreatingClipId(clip.id);
@@ -313,6 +363,7 @@ function YouTubeClipCreator() {
                         className="p-2 border rounded bg-white"
                         title="文字起こしモデルのサイズ（精度と速度のトレードオフ）"
                     >
+                        <option value="none">none (文字起こししない)</option>
                         <option value="tiny">tiny (最速・低精度)</option>
                         <option value="base">base (推奨・バランス)</option>
                         <option value="small">small (高精度・遅い)</option>
@@ -428,7 +479,74 @@ function YouTubeClipCreator() {
                                 </div>
                             </div>
                         )}
-                        <div className="mt-4 flex gap-2">
+                        <div className="mt-4 flex gap-2 flex-wrap">
+                            {!vttUrl && videoInfo && (
+                                <div className="w-full mb-2">
+                                    <label className="text-sm bg-yellow-100 text-yellow-800 px-3 py-2 rounded inline-flex items-center gap-2 cursor-pointer hover:bg-yellow-200">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                        </svg>
+                                        字幕ファイルをアップロード (VTT/SRT)
+                                        <input
+                                            type="file"
+                                            accept=".vtt,.srt"
+                                            className="hidden"
+                                            onChange={async (e) => {
+                                                const file = e.target.files[0];
+                                                if (!file) return;
+
+                                                const formData = new FormData();
+                                                formData.append('file', file);
+                                                formData.append('video_filename', videoInfo.filename);
+
+                                                try {
+                                                    setMessage('字幕ファイルをアップロード中...');
+                                                    const response = await fetch('/youtube/upload-subtitle', {
+                                                        method: 'POST',
+                                                        body: formData
+                                                    });
+
+                                                    if (!response.ok) {
+                                                        throw new Error('字幕アップロードに失敗しました');
+                                                    }
+
+                                                    const data = await response.json();
+                                                    if (data.subtitle_url) {
+                                                        setVttUrl(data.subtitle_url);
+                                                        const vttFilename = data.subtitle_url.split('/').pop();
+                                                        setVttFilename(vttFilename);
+
+                                                        // 字幕アップロード後、自動的に分析を開始
+                                                        setMessage('字幕ファイルがアップロードされました。AIが切り抜き箇所を探しています...');
+                                                        setStatus('analyzing');
+
+                                                        // Reset analysis state
+                                                        setClips([]);
+                                                        setAnalysisOffset(0);
+                                                        setHasMore(false);
+
+                                                        // Start analysis
+                                                        analyzeVideo(vttFilename, 0);
+                                                    }
+                                                    if (data.srt_url) {
+                                                        setSrtUrl(data.srt_url);
+                                                    }
+                                                    if (data.fcpxml_url) {
+                                                        setFcpxmlUrl(data.fcpxml_url);
+                                                    }
+                                                } catch (error) {
+                                                    console.error('Error uploading subtitle:', error);
+                                                    setMessage(`エラー: ${error.message}`);
+                                                    setStatus('error');
+                                                } finally {
+                                                    // ファイル入力をリセット（同じファイルを再度選択可能にする）
+                                                    e.target.value = '';
+                                                }
+                                            }}
+                                        />
+                                    </label>
+                                </div>
+                            )}
                             {vttUrl && (
                                 <a
                                     href={vttUrl}
@@ -485,6 +603,12 @@ function YouTubeClipCreator() {
                                     </button>
                                 )}
                                 <button
+                                    onClick={generateDescription}
+                                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                                >
+                                    概要欄を生成
+                                </button>
+                                <button
                                     onClick={addManualClip}
                                     className="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300"
                                 >
@@ -515,6 +639,13 @@ function YouTubeClipCreator() {
                     </div>
                 )
             }
+
+            <DescriptionModal
+                isOpen={isDescriptionModalOpen}
+                onClose={() => setIsDescriptionModalOpen(false)}
+                initialDescription={generatedDescription}
+                detectedMembers={detectedMembers}
+            />
         </div >
     );
 }

@@ -82,6 +82,7 @@ export default function Upload({ onUploadStart, onUploadSuccess, onUploadError }
                         className="p-1 border rounded bg-white text-sm"
                         onClick={(e) => e.stopPropagation()} // Prevent triggering drop zone click
                     >
+                        <option value="none">none (文字起こししない)</option>
                         <option value="tiny">tiny (最速・低精度)</option>
                         <option value="base">base (推奨・バランス)</option>
                         <option value="small">small (高精度・遅い)</option>

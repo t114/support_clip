@@ -88,6 +88,15 @@ function App() {
 
   const handleUploadSuccess = async (data) => {
     setVideoData(data);
+
+    // subtitle_urlがnullの場合（文字起こしをスキップした場合）
+    if (!data.subtitle_url) {
+      setSubtitles([]);
+      setStatus('success');
+      setProgressMessage('字幕ファイルをアップロードしてください');
+      return;
+    }
+
     try {
       // Fetch and parse the VTT file
       const response = await fetch(`${data.subtitle_url}`);
@@ -95,6 +104,7 @@ function App() {
       const parsedSubtitles = parseVTT(vttText);
       setSubtitles(parsedSubtitles);
       setStatus('success');
+      setProgressMessage('');
     } catch (e) {
       console.error(e);
       setErrorMessage('字幕ファイルの読み込みに失敗しました');
@@ -293,8 +303,9 @@ function App() {
                     </button>
                     <button
                       onClick={handleDownload}
-                      disabled={status === 'processing'}
+                      disabled={status === 'processing' || subtitles.length === 0}
                       className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-blue-300"
+                      title={subtitles.length === 0 ? '字幕ファイルをアップロードしてください' : ''}
                     >
                       {status === 'processing' ? progressMessage : '動画をダウンロード'}
                     </button>
@@ -333,18 +344,87 @@ function App() {
 
                 {/* Right Column: Subtitle Editor */}
                 <div className="lg:col-span-1 space-y-6">
-                  <SubtitleEditor
-                    subtitles={subtitles}
-                    onSubtitlesChange={setSubtitles}
-                    currentTime={currentTime}
-                    onTimeUpdate={setCurrentTime}
-                    videoRef={null}
-                    onSeek={(time) => {
-                      const video = document.querySelector('video');
-                      if (video) video.currentTime = time;
-                    }}
-                    savedStyles={savedStyles}
-                  />
+                  {!videoData.subtitle_url && subtitles.length === 0 && (
+                    <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-6">
+                      <h3 className="font-bold text-yellow-900 mb-3 text-center">
+                        字幕ファイルをアップロード
+                      </h3>
+                      <p className="text-sm text-yellow-800 mb-4 text-center">
+                        VTTまたはSRTファイルをアップロードしてください
+                      </p>
+                      <label className="flex items-center justify-center gap-2 px-4 py-3 bg-yellow-500 text-white rounded-lg cursor-pointer hover:bg-yellow-600 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        字幕ファイルを選択
+                        <input
+                          type="file"
+                          accept=".vtt,.srt"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files[0];
+                            if (!file) return;
+
+                            const formData = new FormData();
+                            formData.append('file', file);
+                            formData.append('video_filename', videoData.unique_filename);
+
+                            try {
+                              setProgressMessage('字幕ファイルをアップロード中...');
+                              const response = await fetch('/youtube/upload-subtitle', {
+                                method: 'POST',
+                                body: formData
+                              });
+
+                              if (!response.ok) {
+                                throw new Error('字幕アップロードに失敗しました');
+                              }
+
+                              const data = await response.json();
+
+                              // Update videoData with new URLs
+                              setVideoData({
+                                ...videoData,
+                                subtitle_url: data.subtitle_url,
+                                srt_url: data.srt_url,
+                                fcpxml_url: data.fcpxml_url
+                              });
+
+                              // Load and parse the subtitle file
+                              const vttResponse = await fetch(data.subtitle_url);
+                              const vttText = await vttResponse.text();
+                              const parsedSubtitles = parseVTT(vttText);
+                              setSubtitles(parsedSubtitles);
+
+                              setProgressMessage('字幕ファイルがアップロードされました');
+                              setTimeout(() => setProgressMessage(''), 3000);
+                            } catch (error) {
+                              console.error('Error uploading subtitle:', error);
+                              alert(`エラー: ${error.message}`);
+                              setProgressMessage('');
+                            } finally {
+                              e.target.value = '';
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {subtitles.length > 0 && (
+                    <SubtitleEditor
+                      subtitles={subtitles}
+                      onSubtitlesChange={setSubtitles}
+                      currentTime={currentTime}
+                      onTimeUpdate={setCurrentTime}
+                      videoRef={null}
+                      onSeek={(time) => {
+                        const video = document.querySelector('video');
+                        if (video) video.currentTime = time;
+                      }}
+                      savedStyles={savedStyles}
+                    />
+                  )}
                 </div>
               </div>
             )}

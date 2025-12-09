@@ -49,21 +49,35 @@ async def upload_video(
         file_extension = os.path.splitext(file.filename)[1]
         if not file_extension:
             file_extension = ".mp4" # Default to mp4 if no extension
-            
+
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         file_path = os.path.join(UPLOAD_DIR, unique_filename)
-        
+
         # Save uploaded file
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
+
+        logger.info(f"Video uploaded: {unique_filename}, model_size: {model_size}")
+
+        # model_size が "none" の場合は文字起こしをスキップ
+        if model_size == "none":
+            logger.info(f"Skipping transcription (model_size=none) for {unique_filename}")
+            return {
+                "video_url": f"/static/{unique_filename}",
+                "subtitle_url": None,
+                "srt_url": None,
+                "fcpxml_url": None,
+                "filename": file.filename,
+                "unique_filename": unique_filename
+            }
+
         # Transcribe
         # Note: In a real app, this should be a background task
         vtt_path = transcribe_video(file_path, model_size=model_size)
-        
+
         # Return URLs relative to the static mount
         srt_path = vtt_path.replace('.vtt', '.srt')
-        
+
         # Generate FCPXML
         # Parse VTT to get segments for FCPXML
         # We need to parse VTT again or have transcribe return segments.
@@ -71,13 +85,13 @@ async def upload_video(
         # For now, let's parse the VTT file we just made.
         from .transcribe import parse_vtt_file
         segments = parse_vtt_file(vtt_path)
-        
+
         video_info = get_video_info(file_path)
         fcpxml_filename = f"{unique_filename}.fcpxml"
         fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
-        
+
         generate_fcpxml(segments, fcpxml_path, file_path, fps=video_info['fps'], duration_seconds=video_info['duration'])
-        
+
         return {
             "video_url": f"/static/{unique_filename}",
             "subtitle_url": f"/static/{os.path.basename(vtt_path)}",
@@ -86,7 +100,7 @@ async def upload_video(
             "filename": file.filename,
             "unique_filename": unique_filename
         }
-        
+
     except Exception as e:
         logger.error(f"Error processing upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -267,46 +281,57 @@ def download_youtube(request: YouTubeDownloadRequest):
         srt_path = os.path.join(UPLOAD_DIR, srt_filename)
         
         # VTTファイルが存在しない場合のみ文字起こし実行
-        if not os.path.exists(vtt_path):
+        # model_size が "none" の場合は文字起こしをスキップ
+        if request.model_size == "none":
+            logger.info(f"Skipping transcription (model_size=none)")
+            update_progress(video_id, "completed", 100, "文字起こしをスキップしました（字幕ファイルをアップロードしてください）")
+            # VTTとSRTのパスを空にする
+            vtt_path = None
+            srt_path = None
+        elif not os.path.exists(vtt_path):
             logger.info(f"Transcribing video: {video_path}")
             update_progress(video_id, "transcribing", 0, "文字起こし準備中...")
-            
+
             def progress_callback(percent):
                 update_progress(video_id, "transcribing", percent, f"文字起こし中... {int(percent)}%")
-                
+
             vtt_path = transcribe_video(video_path, progress_callback=progress_callback, model_size=request.model_size)
             srt_path = vtt_path.replace('.vtt', '.srt')
-            
+
             update_progress(video_id, "transcribing", 100, "文字起こし完了")
         else:
             logger.info(f"Using cached transcription: {vtt_path}")
             update_progress(video_id, "completed", 100, "キャッシュを使用中")
         
-        # Generate FCPXML
-        from .transcribe import parse_vtt_file
-        segments = parse_vtt_file(vtt_path)
-        
-        # FCPXMLのキャッシュ確認
-        fcpxml_filename = f"{base_name}.fcpxml"
-        fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
-        
-        if not os.path.exists(fcpxml_path):
-            logger.info(f"Generating FCPXML: {fcpxml_path}")
-            # video_info already has duration but maybe not fps in the format we want?
-            # youtube_downloader might return info.
-            # Let's use get_video_info to be consistent and accurate with file on disk.
-            video_meta = get_video_info(video_path)
-            generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
-        else:
-            logger.info(f"Using cached FCPXML: {fcpxml_path}")
+        # Generate FCPXML (only if VTT exists)
+        fcpxml_filename = None
+        fcpxml_path = None
+
+        if vtt_path:
+            from .transcribe import parse_vtt_file
+            segments = parse_vtt_file(vtt_path)
+
+            # FCPXMLのキャッシュ確認
+            fcpxml_filename = f"{base_name}.fcpxml"
+            fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
+
+            if not os.path.exists(fcpxml_path):
+                logger.info(f"Generating FCPXML: {fcpxml_path}")
+                # video_info already has duration but maybe not fps in the format we want?
+                # youtube_downloader might return info.
+                # Let's use get_video_info to be consistent and accurate with file on disk.
+                video_meta = get_video_info(video_path)
+                generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
+            else:
+                logger.info(f"Using cached FCPXML: {fcpxml_path}")
         
         update_progress(video_id, "completed", 100, "処理完了")
-        
+
         return {
             "video_url": f"/static/{os.path.basename(video_path)}",
-            "subtitle_url": f"/static/{os.path.basename(vtt_path)}",
-            "srt_url": f"/static/{os.path.basename(srt_path)}",
-            "fcpxml_url": f"/static/{fcpxml_filename}",
+            "subtitle_url": f"/static/{os.path.basename(vtt_path)}" if vtt_path else None,
+            "srt_url": f"/static/{os.path.basename(srt_path)}" if srt_path else None,
+            "fcpxml_url": f"/static/{fcpxml_filename}" if fcpxml_filename else None,
             "filename": os.path.basename(video_path),
             "video_info": video_info,
             "start_time": video_info.get("start_time", 0),
@@ -471,6 +496,98 @@ async def analyze_video(request: AnalyzeRequest):
         print(f"Error analyzing video: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/youtube/upload-subtitle")
+async def upload_subtitle(
+    video_filename: str = Form(...),
+    file: UploadFile = File(...)
+):
+    """
+    Upload subtitle file (VTT or SRT) for a downloaded YouTube video
+    and generate associated files (SRT/VTT conversion and FCPXML)
+    """
+    try:
+        logger.info(f"Uploading subtitle for video: {video_filename}, file: {file.filename}")
+
+        # Verify video exists
+        video_path = os.path.join(UPLOAD_DIR, video_filename)
+        if not os.path.exists(video_path):
+            logger.error(f"Video file not found: {video_path}")
+            raise HTTPException(status_code=404, detail="Video file not found")
+
+        # Check file extension
+        file_extension = os.path.splitext(file.filename)[1].lower()
+        logger.info(f"File extension: {file_extension}")
+
+        if file_extension not in ['.vtt', '.srt']:
+            raise HTTPException(status_code=400, detail="Only VTT or SRT files are supported")
+
+        # Save uploaded subtitle file
+        base_name = os.path.splitext(video_filename)[0]
+        logger.info(f"Base name: {base_name}")
+
+        # Determine paths
+        if file_extension == '.vtt':
+            vtt_filename = f"{base_name}.vtt"
+            vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
+            srt_filename = f"{base_name}.srt"
+            srt_path = os.path.join(UPLOAD_DIR, srt_filename)
+
+            logger.info(f"Saving VTT file to: {vtt_path}")
+            # Save VTT file
+            with open(vtt_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            logger.info(f"Converting VTT to SRT: {srt_path}")
+            # Convert VTT to SRT
+            from .transcribe import convert_vtt_to_srt
+            convert_vtt_to_srt(vtt_path, srt_path)
+
+        else:  # .srt
+            srt_filename = f"{base_name}.srt"
+            srt_path = os.path.join(UPLOAD_DIR, srt_filename)
+            vtt_filename = f"{base_name}.vtt"
+            vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
+
+            logger.info(f"Saving SRT file to: {srt_path}")
+            # Save SRT file
+            with open(srt_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            logger.info(f"Converting SRT to VTT: {vtt_path}")
+            # Convert SRT to VTT
+            from .transcribe import convert_srt_to_vtt
+            convert_srt_to_vtt(srt_path, vtt_path)
+
+        logger.info(f"Parsing VTT file: {vtt_path}")
+        # Generate FCPXML
+        from .transcribe import parse_vtt_file
+        segments = parse_vtt_file(vtt_path)
+        logger.info(f"Parsed {len(segments)} segments")
+
+        fcpxml_filename = f"{base_name}.fcpxml"
+        fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
+
+        logger.info(f"Generating FCPXML: {fcpxml_path}")
+        video_meta = get_video_info(video_path)
+        generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
+
+        logger.info(f"Subtitle uploaded and processed successfully: {vtt_filename}")
+
+        return {
+            "subtitle_url": f"/static/{vtt_filename}",
+            "srt_url": f"/static/{srt_filename}",
+            "fcpxml_url": f"/static/{fcpxml_filename}",
+            "message": "字幕ファイルがアップロードされました"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading subtitle: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 class ClipRequest(BaseModel):
     video_filename: str
     start: float
@@ -608,3 +725,46 @@ async def test_clip_detector():
         "result_count": len(result),
         "result": result
     }
+
+from .description_generator import generate_description, detect_members, get_all_members
+
+class DescriptionRequest(BaseModel):
+    original_url: str
+    original_title: str
+    video_description: str = ""
+    clip_title: Optional[str] = None
+
+@app.post("/generate-description")
+async def generate_video_description(request: DescriptionRequest):
+    """Generate YouTube description for Hololive clip"""
+    try:
+        description = generate_description(
+            original_url=request.original_url,
+            original_title=request.original_title,
+            video_description=request.video_description,
+            clip_title=request.clip_title
+        )
+
+        # Also detect members for frontend display
+        detected_members = detect_members(
+            request.original_title,
+            request.video_description
+        )
+
+        return {
+            "description": description,
+            "detected_members": detected_members
+        }
+    except Exception as e:
+        logger.error(f"Error generating description: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/hololive-members")
+async def get_hololive_members():
+    """Get list of all Hololive members"""
+    try:
+        members = get_all_members()
+        return {"members": members}
+    except Exception as e:
+        logger.error(f"Error getting members: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
