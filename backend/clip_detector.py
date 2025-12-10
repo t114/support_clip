@@ -728,6 +728,9 @@ def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float) -> 
                 'content': prompt,
             },
         ], format='json', options={'temperature': 0.3})
+
+        # Extract content from response
+        content = response['message']['content']
         sys.stderr.write(f"[CLIP_EVALUATOR] Response: {content[:200]}\n")
         sys.stderr.flush()
 

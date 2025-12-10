@@ -5,245 +5,523 @@
       "name_en": "Tokino Sora",
       "channel_url": "https://www.youtube.com/@TokinoSora",
       "generation": "0期生",
-      "keywords": ["ときのそら", "そらちゃん", "Sora"]
+      "keywords": [
+        "ときのそら",
+        "そらちゃん",
+        "Sora"
+      ]
     },
     {
       "name_ja": "AZKi",
       "name_en": "AZKi",
       "channel_url": "https://www.youtube.com/@AZKi",
       "generation": "0期生",
-      "keywords": ["AZKi", "あずき"]
+      "keywords": [
+        "AZKi",
+        "あずき"
+      ]
     },
     {
       "name_ja": "ロボ子さん",
       "name_en": "Roboco",
       "channel_url": "https://www.youtube.com/@Robocosan",
       "generation": "0期生",
-      "keywords": ["ロボ子", "Roboco"]
+      "keywords": [
+        "ロボ子",
+        "Roboco"
+      ]
     },
     {
       "name_ja": "さくらみこ",
       "name_en": "Sakura Miko",
       "channel_url": "https://www.youtube.com/@SakuraMiko",
       "generation": "0期生",
-      "keywords": ["さくらみこ", "みこち", "Miko"]
+      "keywords": [
+        "さくらみこ",
+        "みこち",
+        "Miko"
+      ]
     },
     {
       "name_ja": "星街すいせい",
       "name_en": "Hoshimachi Suisei",
       "channel_url": "https://www.youtube.com/@HoshimachiSuisei",
       "generation": "0期生",
-      "keywords": ["星街すいせい", "すいせい", "すいちゃん", "Suisei"]
+      "keywords": [
+        "星街すいせい",
+        "すいせい",
+        "すいちゃん",
+        "Suisei"
+      ]
     },
     {
       "name_ja": "夜空メル",
       "name_en": "Yozora Mel",
       "channel_url": "https://www.youtube.com/@YozoraMel",
       "generation": "1期生",
-      "keywords": ["夜空メル", "メル", "Mel"]
+      "keywords": [
+        "夜空メル",
+        "メル",
+        "Mel"
+      ]
     },
     {
       "name_ja": "アキ・ローゼンタール",
       "name_en": "Aki Rosenthal",
       "channel_url": "https://www.youtube.com/@AkiRosenthal",
       "generation": "1期生",
-      "keywords": ["アキ", "アキロゼ", "Aki"]
+      "keywords": [
+        "アキ",
+        "アキロゼ",
+        "Aki"
+      ]
     },
     {
       "name_ja": "赤井はあと",
       "name_en": "Akai Haato",
       "channel_url": "https://www.youtube.com/@AkaiHaato",
       "generation": "1期生",
-      "keywords": ["赤井はあと", "はあと", "はあちゃま", "Haato"]
+      "keywords": [
+        "赤井はあと",
+        "はあと",
+        "はあちゃま",
+        "Haato"
+      ]
     },
     {
       "name_ja": "白上フブキ",
       "name_en": "Shirakami Fubuki",
       "channel_url": "https://www.youtube.com/@ShirakamiFubuki",
       "generation": "1期生",
-      "keywords": ["白上フブキ", "フブキ", "フブちゃん", "Fubuki"]
+      "keywords": [
+        "白上フブキ",
+        "フブキ",
+        "フブちゃん",
+        "Fubuki"
+      ]
     },
     {
       "name_ja": "夏色まつり",
       "name_en": "Natsuiro Matsuri",
       "channel_url": "https://www.youtube.com/@NatsuiroMatsuri",
       "generation": "1期生",
-      "keywords": ["夏色まつり", "まつり", "Matsuri"]
+      "keywords": [
+        "夏色まつり",
+        "まつり",
+        "Matsuri"
+      ]
     },
     {
       "name_ja": "湊あくあ",
       "name_en": "Minato Aqua",
       "channel_url": "https://www.youtube.com/@MinatoAqua",
       "generation": "2期生",
-      "keywords": ["湊あくあ", "あくあ", "あくたん", "Aqua"]
+      "keywords": [
+        "湊あくあ",
+        "あくあ",
+        "あくたん",
+        "Aqua"
+      ]
     },
     {
       "name_ja": "紫咲シオン",
       "name_en": "Murasaki Shion",
       "channel_url": "https://www.youtube.com/@MurasakiShion",
       "generation": "2期生",
-      "keywords": ["紫咲シオン", "シオン", "Shion"]
+      "keywords": [
+        "紫咲シオン",
+        "シオン",
+        "Shion"
+      ]
     },
     {
       "name_ja": "百鬼あやめ",
       "name_en": "Nakiri Ayame",
       "channel_url": "https://www.youtube.com/@NakiriAyame",
       "generation": "2期生",
-      "keywords": ["百鬼あやめ", "あやめ", "Ayame"]
+      "keywords": [
+        "百鬼あやめ",
+        "あやめ",
+        "Ayame"
+      ]
     },
     {
       "name_ja": "癒月ちょこ",
       "name_en": "Yuzuki Choco",
       "channel_url": "https://www.youtube.com/@YuzukiChoco",
       "generation": "2期生",
-      "keywords": ["癒月ちょこ", "ちょこ", "ちょこ先", "Choco"]
+      "keywords": [
+        "癒月ちょこ",
+        "ちょこ",
+        "ちょこ先",
+        "Choco"
+      ]
     },
     {
       "name_ja": "大空スバル",
       "name_en": "Oozora Subaru",
       "channel_url": "https://www.youtube.com/@OozoraSubaru",
       "generation": "2期生",
-      "keywords": ["大空スバル", "スバル", "Subaru"]
+      "keywords": [
+        "大空スバル",
+        "スバル",
+        "Subaru"
+      ]
     },
     {
       "name_ja": "兎田ぺこら",
       "name_en": "Usada Pekora",
       "channel_url": "https://www.youtube.com/@UsadaPekora",
       "generation": "3期生",
-      "keywords": ["兎田ぺこら", "ぺこら", "ぺこちゃん", "Pekora"]
+      "keywords": [
+        "兎田ぺこら",
+        "ぺこら",
+        "ぺこちゃん",
+        "Pekora"
+      ]
     },
     {
       "name_ja": "潤羽るしあ",
       "name_en": "Uruha Rushia",
       "channel_url": "https://www.youtube.com/@UruhaRushia",
       "generation": "3期生",
-      "keywords": ["潤羽るしあ", "るしあ", "Rushia"]
+      "keywords": [
+        "潤羽るしあ",
+        "るしあ",
+        "Rushia"
+      ]
     },
     {
       "name_ja": "不知火フレア",
       "name_en": "Shiranui Flare",
       "channel_url": "https://www.youtube.com/@ShiranuiFlare",
       "generation": "3期生",
-      "keywords": ["不知火フレア", "フレア", "Flare"]
+      "keywords": [
+        "不知火フレア",
+        "フレア",
+        "Flare"
+      ]
     },
     {
       "name_ja": "白銀ノエル",
       "name_en": "Shirogane Noel",
       "channel_url": "https://www.youtube.com/@ShiroganeNoel",
       "generation": "3期生",
-      "keywords": ["白銀ノエル", "ノエル", "Noel"]
+      "keywords": [
+        "白銀ノエル",
+        "ノエル",
+        "Noel"
+      ]
     },
     {
       "name_ja": "宝鐘マリン",
       "name_en": "Houshou Marine",
       "channel_url": "https://www.youtube.com/@HoushouMarine",
       "generation": "3期生",
-      "keywords": ["宝鐘マリン", "マリン", "船長", "Marine"]
+      "keywords": [
+        "宝鐘マリン",
+        "マリン",
+        "船長",
+        "Marine"
+      ]
     },
     {
       "name_ja": "天音かなた",
       "name_en": "Amane Kanata",
       "channel_url": "https://www.youtube.com/@AmaneKanata",
       "generation": "4期生",
-      "keywords": ["天音かなた", "かなた", "Kanata"]
+      "keywords": [
+        "天音かなた",
+        "かなた",
+        "Kanata"
+      ]
     },
     {
       "name_ja": "角巻わため",
       "name_en": "Tsunomaki Watame",
       "channel_url": "https://www.youtube.com/@TsunomakiWatame",
       "generation": "4期生",
-      "keywords": ["角巻わため", "わため", "Watame"]
+      "keywords": [
+        "角巻わため",
+        "わため",
+        "Watame"
+      ]
     },
     {
       "name_ja": "常闇トワ",
       "name_en": "Tokoyami Towa",
       "channel_url": "https://www.youtube.com/@TokoyamiTowa",
       "generation": "4期生",
-      "keywords": ["常闇トワ", "トワ", "Towa"]
+      "keywords": [
+        "常闇トワ",
+        "トワ",
+        "Towa"
+      ]
     },
     {
       "name_ja": "姫森ルーナ",
       "name_en": "Himemori Luna",
       "channel_url": "https://www.youtube.com/@HimemoriLuna",
       "generation": "4期生",
-      "keywords": ["姫森ルーナ", "ルーナ", "Luna"]
+      "keywords": [
+        "姫森ルーナ",
+        "ルーナ",
+        "Luna"
+      ]
     },
     {
       "name_ja": "雪花ラミィ",
       "name_en": "Yukihana Lamy",
       "channel_url": "https://www.youtube.com/@YukihanaLamy",
-      "generation": "5期生",
-      "keywords": ["雪花ラミィ", "ラミィ", "Lamy"]
+      "generation": "ねぽらぼ",
+      "keywords": [
+        "雪花ラミィ",
+        "ラミィ",
+        "Lamy"
+      ]
     },
     {
       "name_ja": "桃鈴ねね",
       "name_en": "Momosuzu Nene",
       "channel_url": "https://www.youtube.com/@MomosuzuNene",
-      "generation": "5期生",
-      "keywords": ["桃鈴ねね", "ねね", "ねねち", "Nene"]
+      "generation": "ねぽらぼ",
+      "keywords": [
+        "桃鈴ねね",
+        "ねね",
+        "ねねち",
+        "Nene"
+      ]
     },
     {
       "name_ja": "獅白ぼたん",
       "name_en": "Shishiro Botan",
       "channel_url": "https://www.youtube.com/@ShishiroBotan",
-      "generation": "5期生",
-      "keywords": ["獅白ぼたん", "ぼたん", "Botan"]
+      "generation": "ねぽらぼ",
+      "keywords": [
+        "獅白ぼたん",
+        "ぼたん",
+        "Botan"
+      ]
     },
     {
       "name_ja": "尾丸ポルカ",
       "name_en": "Omaru Polka",
       "channel_url": "https://www.youtube.com/@OmaruPolka",
-      "generation": "5期生",
-      "keywords": ["尾丸ポルカ", "ポルカ", "Polka"]
+      "generation": "ねぽらぼ",
+      "keywords": [
+        "尾丸ポルカ",
+        "ポルカ",
+        "Polka"
+      ]
     },
     {
       "name_ja": "ラプラス・ダークネス",
       "name_en": "La+ Darknesss",
       "channel_url": "https://www.youtube.com/@LaplusDarknesss",
-      "generation": "6期生",
-      "keywords": ["ラプラス", "ラプちゃん", "Laplus"]
+      "generation": "holoX",
+      "keywords": [
+        "ラプラス",
+        "ラプちゃん",
+        "Laplus"
+      ]
     },
     {
       "name_ja": "鷹嶺ルイ",
       "name_en": "Takane Lui",
       "channel_url": "https://www.youtube.com/@TakaneLui",
-      "generation": "6期生",
-      "keywords": ["鷹嶺ルイ", "ルイ", "Lui"]
+      "generation": "holoX",
+      "keywords": [
+        "鷹嶺ルイ",
+        "ルイ",
+        "Lui"
+      ]
     },
     {
       "name_ja": "博衣こより",
       "name_en": "Hakui Koyori",
       "channel_url": "https://www.youtube.com/@HakuiKoyori",
-      "generation": "6期生",
-      "keywords": ["博衣こより", "こより", "Koyori"]
+      "generation": "holoX",
+      "keywords": [
+        "博衣こより",
+        "こより",
+        "Koyori"
+      ]
     },
     {
       "name_ja": "沙花叉クロヱ",
       "name_en": "Sakamata Chloe",
       "channel_url": "https://www.youtube.com/@SakamataChloe",
-      "generation": "6期生",
-      "keywords": ["沙花叉クロヱ", "クロヱ", "Chloe"]
+      "generation": "holoX",
+      "keywords": [
+        "沙花叉クロヱ",
+        "クロヱ",
+        "Chloe"
+      ]
     },
     {
       "name_ja": "風真いろは",
       "name_en": "Kazama Iroha",
       "channel_url": "https://www.youtube.com/@KazamaIroha",
-      "generation": "6期生",
-      "keywords": ["風真いろは", "いろは", "Iroha"]
+      "generation": "holoX",
+      "keywords": [
+        "風真いろは",
+        "いろは",
+        "Iroha"
+      ]
     },
     {
       "name_ja": "猫又おかゆ",
       "name_en": "Nekomata Okayu",
       "channel_url": "https://www.youtube.com/@NekomataOkayu",
       "generation": "GAMERS",
-      "keywords": ["猫又おかゆ", "おかゆ", "Okayu"]
+      "keywords": [
+        "猫又おかゆ",
+        "おかゆ",
+        "Okayu"
+      ]
     },
     {
       "name_ja": "戌神ころね",
       "name_en": "Inugami Korone",
       "channel_url": "https://www.youtube.com/@InugamiKorone",
       "generation": "GAMERS",
-      "keywords": ["戌神ころね", "ころね", "Korone"]
+      "keywords": [
+        "戌神ころね",
+        "ころね",
+        "Korone"
+      ]
+    },
+    {
+      "name_ja": "火威青",
+      "name_en": "Hiodoshi Ao",
+      "channel_url": "https://www.youtube.com/@HiodoshiAo",
+      "generation": "ReGLOSS",
+      "keywords": [
+        "火威青",
+        "あお",
+        "Ao"
+      ]
+    },
+    {
+      "name_ja": "音乃瀬奏",
+      "name_en": "Otonose Kanade",
+      "channel_url": "https://www.youtube.com/@OtonoseKanade",
+      "generation": "ReGLOSS",
+      "keywords": [
+        "音乃瀬奏",
+        "奏",
+        "Kanade"
+      ]
+    },
+    {
+      "name_ja": "一条莉々華",
+      "name_en": "Ichijou Ririka",
+      "channel_url": "https://www.youtube.com/@IchijouRirika",
+      "generation": "ReGLOSS",
+      "keywords": [
+        "一条莉々華",
+        "りりか",
+        "Ririka"
+      ]
+    },
+    {
+      "name_ja": "儒烏風亭らでん",
+      "name_en": "Juufuutei Raden",
+      "channel_url": "https://www.youtube.com/@JuufuuteiRaden",
+      "generation": "ReGLOSS",
+      "keywords": [
+        "儒烏風亭らでん",
+        "らでん",
+        "Raden"
+      ]
+    },
+    {
+      "name_ja": "轟はじめ",
+      "name_en": "Todoroki Hajime",
+      "channel_url": "https://www.youtube.com/@TodorokiHajime",
+      "generation": "ReGLOSS",
+      "keywords": [
+        "轟はじめ",
+        "はじめ",
+        "Hajime"
+      ]
+    },
+    {
+      "name_ja": "響咲リオナ",
+      "name_en": "Isaki Riona",
+      "channel_url": "https://www.youtube.com/@IsakiRiona",
+      "generation": "FLOW GLOW",
+      "keywords": [
+        "響咲リオナ",
+        "リオナ",
+        "Riona"
+      ]
+    },
+    {
+      "name_ja": "虎金妃笑虎",
+      "name_en": "Koganei Niko",
+      "channel_url": "https://www.youtube.com/@KoganeiNiko",
+      "generation": "FLOW GLOW",
+      "keywords": [
+        "虎金妃笑虎",
+        "にこ",
+        "Niko"
+      ]
+    },
+    {
+      "name_ja": "水宮枢",
+      "name_en": "Mizumiya Su",
+      "channel_url": "https://www.youtube.com/@MizumiyaSu",
+      "generation": "FLOW GLOW",
+      "keywords": [
+        "水宮枢",
+        "すう",
+        "Su"
+      ]
+    },
+    {
+      "name_ja": "輪堂千速",
+      "name_en": "Rindo Chihaya",
+      "channel_url": "https://www.youtube.com/@RindoChihaya",
+      "generation": "FLOW GLOW",
+      "keywords": [
+        "輪堂千速",
+        "ちはや",
+        "Chihaya"
+      ]
+    },
+    {
+      "name_ja": "綺々羅々ヴィヴィ",
+      "name_en": "Kikirara Vivi",
+      "channel_url": "https://www.youtube.com/@KikiraraVivi",
+      "generation": "FLOW GLOW",
+      "keywords": [
+        "綺々羅々ヴィヴィ",
+        "ヴィヴィ",
+        "Vivi"
+      ]
+    },
+    {
+      "name_ja": "伊月みちる",
+      "name_en": "Iduki Michiru",
+      "channel_url": "https://www.youtube.com/@holoANroom",
+      "generation": "holoAN",
+      "keywords": [
+        "伊月みちる",
+        "みちる",
+        "Michiru"
+      ]
+    },
+    {
+      "name_ja": "花園さやか",
+      "name_en": "Hanazono Sayaka",
+      "channel_url": "https://www.youtube.com/@holoANroom",
+      "generation": "holoAN",
+      "keywords": [
+        "花園さやか",
+        "さやか",
+        "Sayaka"
+      ]
     }
   ]
 }
