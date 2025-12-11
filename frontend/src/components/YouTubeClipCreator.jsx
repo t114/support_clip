@@ -128,6 +128,7 @@ function YouTubeClipCreator() {
         }
 
         try {
+            console.log('[DOWNLOAD] Starting download request...');
             const response = await fetch('/youtube/download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -138,14 +139,27 @@ function YouTubeClipCreator() {
                 })
             });
 
+            console.log('[DOWNLOAD] Response received:', response.status);
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 const errorMsg = errorData.detail || `ダウンロードに失敗しました (ステータス: ${response.status})`;
                 throw new Error(errorMsg);
             }
 
+            console.log('[DOWNLOAD] Parsing response JSON...');
             const data = await response.json();
-            setVideoInfo(data.video_info);
+            console.log('[DOWNLOAD] Response data:', data);
+            console.log('[DOWNLOAD] has_comments:', data.has_comments);
+            console.log('[DOWNLOAD] video_info:', data.video_info);
+
+            // video_infoにhas_commentsを追加
+            const videoInfoWithComments = {
+                ...data.video_info,
+                has_comments: data.has_comments
+            };
+            setVideoInfo(videoInfoWithComments);
+
             setVideoUrl(data.video_url);
             setVttUrl(data.subtitle_url);
             setSrtUrl(data.srt_url);
@@ -171,24 +185,19 @@ function YouTubeClipCreator() {
                 setStatus('ready');
                 setMessage('✓ 動画のダウンロードが完了しました。字幕ファイルをアップロードしてください。');
             } else {
-                // 字幕がある場合は自動的に分析開始
-                setStatus('analyzing');
+                // 字幕がある場合は解析方法の選択を待つ
+                setStatus('ready');
 
                 // キャッシュ使用時のメッセージ
                 if (data.cached) {
-                    let msg = '✓ キャッシュされた動画を使用しています（ダウンロードをスキップ）。';
                     if (withComments && !data.has_comments) {
-                        msg += ' コメントデータをダウンロード中...';
+                        setMessage('✓ キャッシュされた動画を使用しています。コメントデータをダウンロード中...');
                     } else {
-                        msg += ' AIが切り抜き箇所を探しています...';
+                        setMessage('✓ ダウンロード完了！解析方法を選択してください。');
                     }
-                    setMessage(msg);
                 } else {
-                    setMessage('AIが動画を分析して切り抜き箇所を探しています...');
+                    setMessage('✓ ダウンロード完了！解析方法を選択してください。');
                 }
-
-                // Auto-start analysis
-                analyzeVideo(data.subtitle_url.split('/').pop(), 0);
             }
 
         } catch (e) {
@@ -252,6 +261,88 @@ function YouTubeClipCreator() {
     const handleAnalyzeMore = () => {
         if (vttFilename && hasMore) {
             analyzeVideo(vttFilename, analysisOffset);
+        }
+    };
+
+    const analyzeKusaClips = async () => {
+        try {
+            setStatus('analyzing');
+            setMessage('草絵文字を分析中...');
+
+            const response = await fetch('/youtube/analyze-kusa', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vtt_filename: vttFilename,
+                    clip_duration: 60
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || 'Kusa analysis failed');
+            }
+
+            const data = await response.json();
+
+            if (data.clips && data.clips.length > 0) {
+                // Add IDs to clips
+                const clipsWithIds = data.clips.map((c, i) => ({ ...c, id: Date.now() + i }));
+
+                // Replace existing clips with kusa clips
+                setClips(clipsWithIds);
+                setMessage(`草絵文字クリップが見つかりました (${data.total_clips}件)`);
+            } else {
+                setMessage(data.message || '草絵文字を含むクリップが見つかりませんでした');
+            }
+
+            setStatus('ready');
+
+        } catch (e) {
+            console.error(e);
+            setStatus('ready');
+            setMessage('草絵文字分析に失敗しました: ' + e.message);
+        }
+    };
+
+    const analyzeCommentDensity = async () => {
+        try {
+            setStatus('analyzing');
+            setMessage('コメント量を分析中...');
+
+            const response = await fetch('/youtube/analyze-comment-density', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vtt_filename: vttFilename,
+                    clip_duration: 60
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || 'Comment density analysis failed');
+            }
+
+            const data = await response.json();
+
+            if (data.clips && data.clips.length > 0) {
+                // Add IDs to clips
+                const clipsWithIds = data.clips.map((c, i) => ({ ...c, id: Date.now() + i }));
+
+                // Replace existing clips with comment density clips
+                setClips(clipsWithIds);
+                setMessage(`コメント量クリップが見つかりました (${data.total_clips}件)`);
+            } else {
+                setMessage(data.message || 'コメントを含むクリップが見つかりませんでした');
+            }
+
+            setStatus('ready');
+
+        } catch (e) {
+            console.error(e);
+            setStatus('ready');
+            setMessage('コメント量分析に失敗しました: ' + e.message);
         }
     };
 
@@ -516,17 +607,13 @@ function YouTubeClipCreator() {
                                                         const vttFilename = data.subtitle_url.split('/').pop();
                                                         setVttFilename(vttFilename);
 
-                                                        // 字幕アップロード後、自動的に分析を開始
-                                                        setMessage('字幕ファイルがアップロードされました。AIが切り抜き箇所を探しています...');
-                                                        setStatus('analyzing');
+                                                        // 字幕アップロード後、解析方法の選択を待つ
+                                                        setMessage('字幕ファイルがアップロードされました。解析方法を選択してください。');
 
                                                         // Reset analysis state
                                                         setClips([]);
                                                         setAnalysisOffset(0);
                                                         setHasMore(false);
-
-                                                        // Start analysis
-                                                        analyzeVideo(vttFilename, 0);
                                                     }
                                                     if (data.srt_url) {
                                                         setSrtUrl(data.srt_url);
@@ -584,6 +671,53 @@ function YouTubeClipCreator() {
                                 </a>
                             )}
                         </div>
+
+                        {/* 解析方法選択ボタン（字幕があり、まだクリップがない場合に表示） */}
+                        {vttFilename && clips.length === 0 && status === 'ready' && (
+                            <div className="mt-4 p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
+                                <h4 className="font-bold text-blue-900 mb-3 text-center">解析方法を選択してください</h4>
+                                <div className="flex gap-3 justify-center flex-wrap">
+                                    <button
+                                        onClick={() => {
+                                            setStatus('analyzing');
+                                            setMessage('AIが動画を分析中...');
+                                            analyzeVideo(vttFilename, 0);
+                                        }}
+                                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                        </svg>
+                                        AI解析
+                                    </button>
+                                    {videoInfo?.has_comments && (
+                                        <>
+                                            <button
+                                                onClick={analyzeCommentDensity}
+                                                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                                </svg>
+                                                コメント量解析
+                                            </button>
+                                            <button
+                                                onClick={analyzeKusaClips}
+                                                className="px-6 py-3 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors flex items-center gap-2"
+                                            >
+                                                <span className="text-xl">🌱</span>
+                                                草絵文字解析
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                                {!videoInfo?.has_comments && (
+                                    <p className="text-sm text-gray-600 mt-3 text-center">
+                                        ※ コメント解析を使用するには、動画ダウンロード時に「コメント/チャットも取得」にチェックを入れてください
+                                    </p>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -593,7 +727,7 @@ function YouTubeClipCreator() {
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
                             <h3 className="text-xl font-bold">切り抜き候補 ({clips.length}件)</h3>
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 flex-wrap">
                                 {hasMore && (
                                     <button
                                         onClick={handleAnalyzeMore}
@@ -601,6 +735,28 @@ function YouTubeClipCreator() {
                                     >
                                         さらに解析
                                     </button>
+                                )}
+                                {videoInfo?.has_comments && vttFilename && (
+                                    <>
+                                        <button
+                                            onClick={analyzeCommentDensity}
+                                            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center gap-1"
+                                            title="コメント量で切り抜き候補を検出"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                            </svg>
+                                            コメント量で解析
+                                        </button>
+                                        <button
+                                            onClick={analyzeKusaClips}
+                                            className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 flex items-center gap-1"
+                                            title="コメント内の草絵文字の使用頻度で切り抜き候補を検出"
+                                        >
+                                            <span>🌱</span>
+                                            草絵文字で解析
+                                        </button>
+                                    </>
                                 )}
                                 <button
                                     onClick={generateDescription}

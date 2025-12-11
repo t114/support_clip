@@ -2,6 +2,7 @@ import yt_dlp
 import os
 import uuid
 import re
+import json
 from urllib.parse import urlparse, parse_qs
 from .config import YOUTUBE_DOWNLOAD_FORMAT
 

@@ -6,7 +6,7 @@ import os
 import uuid
 from .transcribe import transcribe_video
 from .youtube_downloader import download_youtube_video
-from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality, count_comments_in_clips
+from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality, count_comments_in_clips, detect_kusa_emoji_clips, detect_comment_density_clips
 from .video_clipper import extract_clip, merge_clips
 from .config import DEFAULT_MAX_CLIPS
 from .fcpxml_generator import generate_fcpxml
@@ -211,12 +211,14 @@ async def get_video_progress(video_id: str):
 
 @app.post("/youtube/download")
 def download_youtube(request: YouTubeDownloadRequest):
+    logger.info(f"[YOUTUBE_DOWNLOAD] Endpoint called with URL: {request.url}, model_size: {request.model_size}, with_comments: {request.with_comments}")
     try:
         # Extract video ID early if possible, or wait until download
         import re
         import time
         video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', request.url)
         video_id = video_id_match.group(1) if video_id_match else "unknown"
+        logger.info(f"[YOUTUBE_DOWNLOAD] Extracted video ID: {video_id}")
         
         # Check if job is already running
         current_progress = get_progress(video_id)
@@ -327,7 +329,7 @@ def download_youtube(request: YouTubeDownloadRequest):
         
         update_progress(video_id, "completed", 100, "処理完了")
 
-        return {
+        response_data = {
             "video_url": f"/static/{os.path.basename(video_path)}",
             "subtitle_url": f"/static/{os.path.basename(vtt_path)}" if vtt_path else None,
             "srt_url": f"/static/{os.path.basename(srt_path)}" if srt_path else None,
@@ -338,6 +340,10 @@ def download_youtube(request: YouTubeDownloadRequest):
             "cached": is_cached,
             "has_comments": video_info.get("comments_file") is not None
         }
+
+        logger.info(f"[YOUTUBE_DOWNLOAD] Returning response for {video_id}: {response_data.keys()}")
+        logger.info(f"[YOUTUBE_DOWNLOAD] has_comments={response_data['has_comments']}, comments_file={video_info.get('comments_file')}")
+        return response_data
     except Exception as e:
         logger.error(f"Error downloading YouTube video: {e}")
         # Try to extract video ID to update error status
@@ -494,6 +500,158 @@ async def analyze_video(request: AnalyzeRequest):
 
     except Exception as e:
         print(f"Error analyzing video: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class AnalyzeKusaRequest(BaseModel):
+    vtt_filename: str
+    clip_duration: int = 60  # 1-minute clips by default
+
+@app.post("/youtube/analyze-kusa")
+async def analyze_kusa_clips(request: AnalyzeKusaRequest):
+    """
+    Analyze video for kusa emoji (:*kusa*:) frequency in live chat.
+    Returns top 10 clips with highest kusa emoji density per minute.
+    """
+    try:
+        vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
+        if not os.path.exists(vtt_path):
+            raise HTTPException(status_code=404, detail="Subtitle file not found")
+
+        # Find video file to get duration
+        base_path = os.path.splitext(vtt_path)[0]
+        video_path = None
+        for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
+            candidate = base_path + ext
+            if os.path.exists(candidate):
+                video_path = candidate
+                break
+
+        if not video_path:
+            raise HTTPException(status_code=404, detail="Video file not found")
+
+        # Get video duration
+        video_info = get_video_info(video_path)
+        video_duration = video_info['duration']
+
+        # Find comments file
+        base_name = os.path.splitext(request.vtt_filename)[0]
+        live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
+        info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+
+        comments_path = None
+        if os.path.exists(live_chat_path):
+            comments_path = live_chat_path
+            print(f"Found live chat file: {comments_path}")
+        elif os.path.exists(info_json_path):
+            comments_path = info_json_path
+            print(f"Found info.json file: {comments_path}")
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="コメントファイルが見つかりません。動画ダウンロード時にコメント取得を有効にしてください。"
+            )
+
+        # Detect kusa emoji clips
+        clips = detect_kusa_emoji_clips(
+            comments_path=comments_path,
+            video_duration=video_duration,
+            clip_duration=request.clip_duration
+        )
+
+        if not clips:
+            return {
+                "clips": [],
+                "message": "草絵文字を含むクリップが見つかりませんでした"
+            }
+
+        return {
+            "clips": clips,
+            "total_clips": len(clips),
+            "message": f"草絵文字が多い上位{len(clips)}件のクリップを検出しました"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error analyzing kusa clips: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+class AnalyzeCommentDensityRequest(BaseModel):
+    vtt_filename: str
+    clip_duration: int = 60  # 1-minute clips by default
+
+@app.post("/youtube/analyze-comment-density")
+async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
+    """
+    Analyze video for comment density (total comments per minute).
+    Returns top 10 clips with highest comment count.
+    """
+    try:
+        vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
+        if not os.path.exists(vtt_path):
+            raise HTTPException(status_code=404, detail="Subtitle file not found")
+
+        # Find video file to get duration
+        base_path = os.path.splitext(vtt_path)[0]
+        video_path = None
+        for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
+            candidate = base_path + ext
+            if os.path.exists(candidate):
+                video_path = candidate
+                break
+
+        if not video_path:
+            raise HTTPException(status_code=404, detail="Video file not found")
+
+        # Get video duration
+        video_info = get_video_info(video_path)
+        video_duration = video_info['duration']
+
+        # Find comments file
+        base_name = os.path.splitext(request.vtt_filename)[0]
+        live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
+        info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+
+        comments_path = None
+        if os.path.exists(live_chat_path):
+            comments_path = live_chat_path
+            print(f"Found live chat file: {comments_path}")
+        elif os.path.exists(info_json_path):
+            comments_path = info_json_path
+            print(f"Found info.json file: {comments_path}")
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="コメントファイルが見つかりません。動画ダウンロード時にコメント取得を有効にしてください。"
+            )
+
+        # Detect comment density clips
+        clips = detect_comment_density_clips(
+            comments_path=comments_path,
+            video_duration=video_duration,
+            clip_duration=request.clip_duration
+        )
+
+        if not clips:
+            return {
+                "clips": [],
+                "message": "コメントを含むクリップが見つかりませんでした"
+            }
+
+        return {
+            "clips": clips,
+            "total_clips": len(clips),
+            "message": f"コメント量が多い上位{len(clips)}件のクリップを検出しました"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error analyzing comment density: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/youtube/upload-subtitle")

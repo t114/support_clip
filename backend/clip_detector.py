@@ -68,6 +68,7 @@ def extend_short_clips(clips: list, video_duration: float, target_duration: floa
 def detect_silence_boundaries(video_path: str, min_silence_len: int = 800, silence_thresh: int = -40) -> list:
     """
     音声ファイルから無音区間を検出して、話の区切り候補を返す
+    キャッシュ機能付き：一度検出した結果を保存して再利用
 
     Args:
         video_path: 動画ファイルのパス
@@ -78,12 +79,30 @@ def detect_silence_boundaries(video_path: str, min_silence_len: int = 800, silen
         無音区間の終了時刻のリスト（秒）
     """
     try:
+        # キャッシュファイルのパスを生成
+        cache_file = f"{video_path}.silence_cache.json"
+        cache_key = f"{min_silence_len}_{silence_thresh}"
+
+        # キャッシュが存在すればそれを使用
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r') as f:
+                    cache_data = json.load(f)
+                    if cache_key in cache_data:
+                        boundaries = cache_data[cache_key]
+                        sys.stderr.write(f"[SILENCE_DETECTOR] Using cached silence boundaries ({len(boundaries)} boundaries)\n")
+                        sys.stderr.flush()
+                        return boundaries
+            except Exception as e:
+                sys.stderr.write(f"[SILENCE_DETECTOR] Cache read error: {e}, proceeding with detection\n")
+                sys.stderr.flush()
+
         sys.stderr.write(f"[SILENCE_DETECTOR] Detecting silence using ffmpeg (min_len={min_silence_len}ms, thresh={silence_thresh}dB)...\n")
         sys.stderr.flush()
 
         # Convert ms to seconds for ffmpeg
         duration_sec = min_silence_len / 1000.0
-        
+
         # Construct ffmpeg command
         # ffmpeg -i input.mp4 -af silencedetect=noise=-40dB:d=0.8 -f null -
         cmd = [
@@ -93,7 +112,7 @@ def detect_silence_boundaries(video_path: str, min_silence_len: int = 800, silen
             '-f', 'null',
             '-'
         ]
-        
+
         # Run ffmpeg
         process = subprocess.Popen(
             cmd,
@@ -101,9 +120,9 @@ def detect_silence_boundaries(video_path: str, min_silence_len: int = 800, silen
             stderr=subprocess.PIPE,
             universal_newlines=True
         )
-        
+
         _, stderr = process.communicate()
-        
+
         # Parse output for silence_end
         boundaries = []
         for line in stderr.split('\n'):
@@ -119,6 +138,21 @@ def detect_silence_boundaries(video_path: str, min_silence_len: int = 800, silen
 
         sys.stderr.write(f"[SILENCE_DETECTOR] Found {len(boundaries)} silence boundaries\n")
         sys.stderr.flush()
+
+        # キャッシュに保存
+        try:
+            cache_data = {}
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r') as f:
+                    cache_data = json.load(f)
+            cache_data[cache_key] = boundaries
+            with open(cache_file, 'w') as f:
+                json.dump(cache_data, f)
+            sys.stderr.write(f"[SILENCE_DETECTOR] Cached silence boundaries to {cache_file}\n")
+            sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f"[SILENCE_DETECTOR] Cache write error: {e}\n")
+            sys.stderr.flush()
 
         return boundaries
     except Exception as e:
@@ -192,10 +226,31 @@ def detect_boundaries_hybrid(video_path: str, segments: list, max_clips: int = 5
 
     first_time = segments[0].start if hasattr(segments[0], 'start') else segments[0]['start']
     last_time = segments[-1].end if hasattr(segments[-1], 'end') else segments[-1]['end']
-    video_duration = last_time - first_time
+
+    # Get actual video duration from file (not from segments)
+    from .video_processing import get_video_info
+    try:
+        video_info = get_video_info(video_path)
+        actual_video_duration = video_info['duration']
+    except Exception as e:
+        sys.stderr.write(f"[HYBRID_DETECTOR] Warning: Could not get video duration from file: {e}, using segments\n")
+        sys.stderr.flush()
+        actual_video_duration = last_time - first_time
 
     # 1. 無音区間を検出
-    silence_boundaries = detect_silence_boundaries(video_path)
+    # 動画が3時間以上の場合、初回実行ではsilence detectionをスキップ（キャッシュがある場合は使用）
+    silence_boundaries = []
+    cache_file = f"{video_path}.silence_cache.json"
+    if actual_video_duration > 10800:  # 3 hours
+        if os.path.exists(cache_file):
+            sys.stderr.write(f"[HYBRID_DETECTOR] Long video ({actual_video_duration/3600:.1f}h), checking for cached silence data...\n")
+            sys.stderr.flush()
+            silence_boundaries = detect_silence_boundaries(video_path)
+        else:
+            sys.stderr.write(f"[HYBRID_DETECTOR] Skipping silence detection for long video ({actual_video_duration/3600:.1f}h, no cache found)\n")
+            sys.stderr.flush()
+    else:
+        silence_boundaries = detect_silence_boundaries(video_path)
 
     # 2. 文章区切りを検出
     sentence_boundaries = detect_sentence_boundaries(segments)
@@ -874,3 +929,310 @@ def count_comments_in_clips(clips: list, comments_path: str) -> list:
         import traceback
         traceback.print_exc()
         return clips
+
+def detect_kusa_emoji_clips(comments_path: str, video_duration: float, clip_duration: int = 60) -> list:
+    """
+    Detects clips based on kusa emoji (:*kusa*:) frequency in comments.
+    Analyzes 1-minute windows and returns top 10 clips with highest kusa emoji usage.
+
+    Args:
+        comments_path: Path to the live_chat.json or info.json file
+        video_duration: Total video duration in seconds
+        clip_duration: Duration of each clip window in seconds (default: 60)
+
+    Returns:
+        List of top 10 clips sorted by kusa emoji frequency
+    """
+    try:
+        if not os.path.exists(comments_path):
+            print(f"Comments file not found: {comments_path}")
+            return []
+
+        print(f"[KUSA_DETECTOR] Analyzing kusa emojis from {comments_path}...")
+
+        kusa_events = []  # List of (timestamp, count) tuples
+
+        # Check if it's a live chat file (NDJSON)
+        if comments_path.endswith('.live_chat.json'):
+            print("[KUSA_DETECTOR] Parsing live chat data (NDJSON)...")
+            with open(comments_path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f):
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+
+                        # Extract timestamp and message
+                        if 'replayChatItemAction' in data:
+                            action = data['replayChatItemAction']
+
+                            # Get timestamp
+                            if 'videoOffsetTimeMsec' not in action:
+                                continue
+                            timestamp = int(action['videoOffsetTimeMsec']) / 1000.0
+
+                            # Search for kusa emoji in message
+                            kusa_count = 0
+
+                            # Navigate to the actual message content
+                            actions = action.get('actions', [])
+                            for act in actions:
+                                # Check for addChatItemAction
+                                if 'addChatItemAction' in act:
+                                    item = act['addChatItemAction'].get('item', {})
+
+                                    # Check liveChatTextMessageRenderer
+                                    if 'liveChatTextMessageRenderer' in item:
+                                        renderer = item['liveChatTextMessageRenderer']
+                                        message_data = renderer.get('message', {})
+
+                                        # Check runs for emoji
+                                        runs = message_data.get('runs', [])
+                                        for run in runs:
+                                            # Text emoji like :*kusa*:
+                                            if 'text' in run and ':' in run['text']:
+                                                text = run['text']
+                                                # Count kusa patterns
+                                                kusa_count += text.count(':*kusa*:')
+                                                kusa_count += text.count(':kusa:')
+                                                kusa_count += text.count('草')
+
+                                            # Emoji object (member stamps)
+                                            if 'emoji' in run:
+                                                emoji = run['emoji']
+                                                is_kusa = False
+
+                                                # Check shortcuts array (e.g., [":_mikoKusa:", ":mikoKusa:", ":_kusa:", ":kusa:"])
+                                                shortcuts = emoji.get('shortcuts', [])
+                                                for shortcut in shortcuts:
+                                                    if 'kusa' in shortcut.lower():
+                                                        is_kusa = True
+                                                        break
+
+                                                # Also check searchTerms as fallback (if shortcuts is empty or didn't match)
+                                                if not is_kusa:
+                                                    search_terms = emoji.get('searchTerms', [])
+                                                    for term in search_terms:
+                                                        if 'kusa' in term.lower():
+                                                            is_kusa = True
+                                                            break
+
+                                                if is_kusa:
+                                                    kusa_count += 1
+
+                            if kusa_count > 0:
+                                kusa_events.append((timestamp, kusa_count))
+
+                    except Exception as e:
+                        if line_num < 10:  # Only log first 10 errors
+                            print(f"[KUSA_DETECTOR] Error parsing line {line_num}: {e}")
+                        continue
+
+            print(f"[KUSA_DETECTOR] Found {len(kusa_events)} kusa emoji events")
+
+        else:
+            # Standard info.json format
+            print("[KUSA_DETECTOR] Parsing standard info.json...")
+            with open(comments_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            comments = data.get('comments', [])
+            print(f"[KUSA_DETECTOR] Found {len(comments)} comments")
+
+            for c in comments:
+                # Get timestamp
+                timestamp = None
+                if 'offset_seconds' in c:
+                    timestamp = float(c['offset_seconds'])
+
+                if timestamp is None:
+                    continue
+
+                # Search for kusa in text
+                text = c.get('text', '')
+                kusa_count = text.count(':*kusa*:') + text.count(':kusa:') + text.count('草')
+
+                if kusa_count > 0:
+                    kusa_events.append((timestamp, kusa_count))
+
+        if not kusa_events:
+            print("[KUSA_DETECTOR] No kusa emojis found in comments")
+            return []
+
+        print(f"[KUSA_DETECTOR] Total kusa emoji uses: {sum(count for _, count in kusa_events)}")
+
+        # Group by time windows (1 minute intervals)
+        window_stats = {}  # {start_time: total_kusa_count}
+
+        for timestamp, count in kusa_events:
+            # Round down to nearest minute
+            window_start = int(timestamp // clip_duration) * clip_duration
+
+            if window_start not in window_stats:
+                window_stats[window_start] = 0
+            window_stats[window_start] += count
+
+        print(f"[KUSA_DETECTOR] Analyzed {len(window_stats)} time windows")
+
+        # Create clips from windows
+        clips = []
+        for start_time, kusa_count in window_stats.items():
+            end_time = min(start_time + clip_duration, video_duration)
+
+            # Skip if clip would be too short
+            if end_time - start_time < 10:
+                continue
+
+            clips.append({
+                'start': start_time,
+                'end': end_time,
+                'kusa_count': kusa_count,
+                'kusa_per_minute': kusa_count / ((end_time - start_time) / 60.0),
+                'title': f'草絵文字 {kusa_count}個 ({start_time//60:.0f}:{start_time%60:02.0f})',
+                'reason': f'この1分間に草絵文字が{kusa_count}個使われました（盛り上がっている箇所）'
+            })
+
+        # Sort by kusa count (descending) and take top 10
+        clips.sort(key=lambda x: x['kusa_count'], reverse=True)
+        top_clips = clips[:10]
+
+        print(f"[KUSA_DETECTOR] Top 10 clips by kusa emoji frequency:")
+        for i, clip in enumerate(top_clips, 1):
+            print(f"  {i}. {clip['start']:.0f}-{clip['end']:.0f}s: {clip['kusa_count']} kusa emojis ({clip['kusa_per_minute']:.1f}/min)")
+
+        return top_clips
+
+    except Exception as e:
+        print(f"[KUSA_DETECTOR] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+def detect_comment_density_clips(comments_path: str, video_duration: float, clip_duration: int = 60) -> list:
+    """
+    Detects clips based on comment density (total number of comments per minute).
+    Analyzes 1-minute windows and returns top 10 clips with highest comment count.
+
+    Args:
+        comments_path: Path to the live chat JSON file
+        video_duration: Total video duration in seconds
+        clip_duration: Duration of each clip in seconds (default: 60s = 1 minute)
+
+    Returns:
+        List of clip dictionaries sorted by comment count (descending)
+    """
+    try:
+        if not os.path.exists(comments_path):
+            print(f"[COMMENT_DENSITY] Comments file not found: {comments_path}")
+            return []
+
+        comment_events = []  # List of timestamps
+
+        # Parse live chat (NDJSON)
+        if comments_path.endswith('.live_chat.json'):
+            print("[COMMENT_DENSITY] Parsing live chat data (NDJSON)...")
+            with open(comments_path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f):
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+
+                        # Extract timestamp
+                        if 'replayChatItemAction' in data:
+                            action = data['replayChatItemAction']
+
+                            # Get timestamp
+                            if 'videoOffsetTimeMsec' not in action:
+                                continue
+                            timestamp = int(action['videoOffsetTimeMsec']) / 1000.0
+
+                            # Check if it's an actual chat message (not system messages)
+                            actions = action.get('actions', [])
+                            for act in actions:
+                                if 'addChatItemAction' in act:
+                                    item = act['addChatItemAction'].get('item', {})
+
+                                    # Count text messages and paid messages
+                                    if 'liveChatTextMessageRenderer' in item or \
+                                       'liveChatPaidMessageRenderer' in item or \
+                                       'liveChatPaidStickerRenderer' in item or \
+                                       'liveChatMembershipItemRenderer' in item:
+                                        comment_events.append(timestamp)
+                                        break  # Only count once per action
+
+                    except Exception as e:
+                        if line_num < 10:  # Only log first 10 errors
+                            print(f"[COMMENT_DENSITY] Error parsing line {line_num}: {e}")
+                        continue
+
+            print(f"[COMMENT_DENSITY] Found {len(comment_events)} comments")
+
+        else:
+            # Parse info.json if it exists
+            print("[COMMENT_DENSITY] Parsing info.json...")
+            with open(comments_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            comments = data.get('comments', [])
+            print(f"[COMMENT_DENSITY] Found {len(comments)} comments")
+
+            for c in comments:
+                # Get timestamp
+                timestamp = None
+                if 'offset_seconds' in c:
+                    timestamp = float(c['offset_seconds'])
+
+                if timestamp is not None:
+                    comment_events.append(timestamp)
+
+        if not comment_events:
+            print("[COMMENT_DENSITY] No comments found")
+            return []
+
+        print(f"[COMMENT_DENSITY] Total comments: {len(comment_events)}")
+
+        # Group by time windows (1 minute intervals)
+        window_stats = {}  # {start_time: comment_count}
+
+        for timestamp in comment_events:
+            # Round down to nearest minute
+            window_start = int(timestamp // clip_duration) * clip_duration
+
+            if window_start not in window_stats:
+                window_stats[window_start] = 0
+            window_stats[window_start] += 1
+
+        # Create clips from windows
+        clips = []
+        for start_time, comment_count in window_stats.items():
+            end_time = min(start_time + clip_duration, video_duration)
+
+            # Skip clips that are too short
+            if end_time - start_time < 10:
+                continue
+
+            clips.append({
+                'start': start_time,
+                'end': end_time,
+                'comment_count': comment_count,
+                'comments_per_minute': comment_count / ((end_time - start_time) / 60.0),
+                'title': f'コメント {comment_count}件 ({start_time//60:.0f}:{start_time%60:02.0f})',
+                'reason': f'この1分間に{comment_count}件のコメントがありました（盛り上がっている箇所）'
+            })
+
+        # Sort by comment count (descending) and take top 10
+        clips.sort(key=lambda x: x['comment_count'], reverse=True)
+        top_clips = clips[:10]
+
+        print(f"[COMMENT_DENSITY] Top 10 clips by comment density:")
+        for i, clip in enumerate(top_clips, 1):
+            print(f"  {i}. {clip['start']:.0f}-{clip['end']:.0f}s: {clip['comment_count']} comments ({clip['comments_per_minute']:.1f}/min)")
+
+        return top_clips
+
+    except Exception as e:
+        print(f"[COMMENT_DENSITY] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
