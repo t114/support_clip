@@ -94,6 +94,9 @@ def generate_description(
     lines.append("■ タグ")
     tags = ["#ホロライブ", "#切り抜き"]
 
+    # Add general tags
+    tags.extend(["#hololive", "#ホロライブ切り抜き", "#vtuber", "#ホロ"])
+
     # Add member-specific tags
     for member in detected_members:
         tags.append(f"#{member['name_ja']}")
@@ -102,6 +105,28 @@ def generate_description(
             gen_tag = member['generation'].replace('期生', '期')
             if 'GAMERS' not in gen_tag:
                 tags.append(f"#ホロライブ{gen_tag}")
+
+    # Add collaboration tags for known pairs
+    member_names = [m['name_ja'] for m in detected_members]
+    if '猫又おかゆ' in member_names and '戌神ころね' in member_names:
+        tags.append("#おかころ")
+
+    # Detect game/content tags from title and description
+    combined_text = f"{original_title} {video_description}".lower()
+    game_tags = []
+
+    if 'マイクラ' in combined_text or 'マインクラフト' in combined_text or 'minecraft' in combined_text:
+        game_tags.extend(["#マイクラ", "#マインクラフト"])
+    if 'apex' in combined_text or 'エーペックス' in combined_text:
+        game_tags.append("#APEX")
+    if 'ark' in combined_text or 'アーク' in combined_text:
+        game_tags.append("#ARK")
+    if 'ポケモン' in combined_text or 'pokemon' in combined_text or 'ポケットモンスター' in combined_text:
+        game_tags.append("#ポケモン")
+    if 'スプラ' in combined_text or 'splatoon' in combined_text:
+        game_tags.append("#スプラトゥーン")
+
+    tags.extend(game_tags)
 
     lines.append("　" + " ".join(tags))
     lines.append("")

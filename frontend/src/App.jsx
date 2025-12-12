@@ -4,7 +4,7 @@ import YouTubeClipCreator from './components/YouTubeClipCreator';
 import VideoPlayer from './components/VideoPlayer';
 import SubtitleEditor from './components/SubtitleEditor';
 import StyleEditor from './components/StyleEditor';
-import { parseVTT, stringifyVTT } from './utils/vtt';
+import { parseVTT, stringifyVTT, stringifySRT } from './utils/vtt';
 
 function App() {
   const [status, setStatus] = useState('idle'); // idle, uploading, success, error
@@ -197,6 +197,36 @@ function App() {
     }
   };
 
+  const handleDownloadVTT = () => {
+    if (subtitles.length === 0) return;
+
+    const vttContent = stringifyVTT(subtitles);
+    const blob = new Blob([vttContent], { type: 'text/vtt' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = videoData?.filename ? `${videoData.filename.replace(/\.[^/.]+$/, '')}.vtt` : 'subtitles.vtt';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadSRT = () => {
+    if (subtitles.length === 0) return;
+
+    const srtContent = stringifySRT(subtitles);
+    const blob = new Blob([srtContent], { type: 'text/srt' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = videoData?.filename ? `${videoData.filename.replace(/\.[^/.]+$/, '')}.srt` : 'subtitles.srt';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const reset = () => {
     setStatus('idle');
     setVideoData(null);
@@ -310,24 +340,22 @@ function App() {
                       {status === 'processing' ? progressMessage : '動画をダウンロード'}
                     </button>
 
-                    {videoData?.srt_url && (
-                      <a
-                        href={videoData.srt_url}
-                        download
+                    {subtitles.length > 0 && (
+                      <button
+                        onClick={handleDownloadSRT}
                         className="px-6 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors flex items-center"
                       >
                         SRTをダウンロード
-                      </a>
+                      </button>
                     )}
 
-                    {videoData?.subtitle_url && (
-                      <a
-                        href={videoData.subtitle_url}
-                        download
+                    {subtitles.length > 0 && (
+                      <button
+                        onClick={handleDownloadVTT}
                         className="px-6 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors flex items-center"
                       >
                         VTTをダウンロード
-                      </a>
+                      </button>
                     )}
 
                     {videoData?.fcpxml_url && (

@@ -58,6 +58,28 @@ function formatTimestamp(seconds) {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 }
 
+export function stringifySRT(subtitles) {
+    let output = '';
+
+    for (let i = 0; i < subtitles.length; i++) {
+        const sub = subtitles[i];
+        output += `${i + 1}\n`;
+        output += `${formatTimestampSRT(sub.start)} --> ${formatTimestampSRT(sub.end)}\n`;
+        output += `${sub.text}\n\n`;
+    }
+
+    return output;
+}
+
+function formatTimestampSRT(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 1000);
+
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+}
+
 export function generateUUID() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         return crypto.randomUUID();
