@@ -309,7 +309,7 @@ def get_video_info(video_path):
             "ffprobe",
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=r_frame_rate,duration",
+            "-show_entries", "stream=width,height,r_frame_rate,duration",
             "-of", "json",
             video_path
         ]
@@ -321,6 +321,8 @@ def get_video_info(video_path):
         stream = data['streams'][0]
         r_frame_rate = stream.get('r_frame_rate', '30/1')
         duration = float(stream.get('duration', 0))
+        width = int(stream.get('width', 0))
+        height = int(stream.get('height', 0))
         
         # Calculate FPS from "num/den" string
         num, den = map(int, r_frame_rate.split('/'))
@@ -328,8 +330,10 @@ def get_video_info(video_path):
         
         return {
             "fps": fps,
-            "duration": duration
+            "duration": duration,
+            "width": width,
+            "height": height
         }
 
     except Exception as e:
-        return {"fps": 30.0, "duration": 0}
+        return {"fps": 30.0, "duration": 0, "width": 0, "height": 0}

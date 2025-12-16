@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import ClipPreview from './ClipPreview';
 import DescriptionModal from './DescriptionModal';
+import TwitterModal from './TwitterModal';
 
 function YouTubeClipCreator() {
     const [url, setUrl] = useState('');
@@ -25,7 +26,12 @@ function YouTubeClipCreator() {
     // Description modal state
     const [isDescriptionModalOpen, setIsDescriptionModalOpen] = useState(false);
     const [generatedDescription, setGeneratedDescription] = useState('');
+    // Twitter modal state
     const [detectedMembers, setDetectedMembers] = useState([]);
+
+    // Twitter modal state
+    const [isTwitterModalOpen, setIsTwitterModalOpen] = useState(false);
+    const [twitterPrText, setTwitterPrText] = useState('');
 
     // YouTube URLからt=パラメータを抽出
     const extractStartTimeFromUrl = (url) => {
@@ -153,10 +159,11 @@ function YouTubeClipCreator() {
             console.log('[DOWNLOAD] has_comments:', data.has_comments);
             console.log('[DOWNLOAD] video_info:', data.video_info);
 
-            // video_infoにhas_commentsを追加
+            // video_infoにhas_commentsとfilenameを追加
             const videoInfoWithComments = {
                 ...data.video_info,
-                has_comments: data.has_comments
+                has_comments: data.has_comments,
+                filename: data.filename
             };
             setVideoInfo(videoInfoWithComments);
 
@@ -274,6 +281,7 @@ function YouTubeClipCreator() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     vtt_filename: vttFilename,
+                    video_filename: videoInfo?.filename,
                     clip_duration: 60
                 })
             });
@@ -315,6 +323,7 @@ function YouTubeClipCreator() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     vtt_filename: vttFilename,
+                    video_filename: videoInfo?.filename,
                     clip_duration: 60
                 })
             });
@@ -398,6 +407,40 @@ function YouTubeClipCreator() {
         }
     };
 
+    const generateTwitterPR = async () => {
+        try {
+            if (!videoInfo) {
+                alert('動画情報がありません');
+                return;
+            }
+
+            setMessage('PR文章を生成中...');
+            const response = await fetch('/generate-twitter-pr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    original_url: url,
+                    original_title: videoInfo.title || '',
+                    video_description: videoInfo.description || '',
+                    clip_title: null
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            setTwitterPrText(data.pr_text);
+            setIsTwitterModalOpen(true);
+            setMessage('PR文章を生成しました');
+        } catch (error) {
+            console.error('Error generating Twitter PR:', error);
+            setMessage(`PR文章の生成に失敗しました: ${error.message}`);
+        }
+    };
+
     const createClip = async (clip) => {
         try {
             setCreatingClipId(clip.id);
@@ -409,7 +452,11 @@ function YouTubeClipCreator() {
                     video_filename: videoInfo.filename,
                     start: clip.start,
                     end: clip.end,
-                    title: clip.title
+                    title: clip.title,
+                    crop_x: clip.crop_x,
+                    crop_y: clip.crop_y,
+                    crop_width: clip.crop_width,
+                    crop_height: clip.crop_height
                 })
             });
 
@@ -672,24 +719,26 @@ function YouTubeClipCreator() {
                             )}
                         </div>
 
-                        {/* 解析方法選択ボタン（字幕があり、まだクリップがない場合に表示） */}
-                        {vttFilename && clips.length === 0 && status === 'ready' && (
+                        {/* 解析方法選択ボタン（クリップがない場合に表示） */}
+                        {(vttFilename || videoInfo?.has_comments) && clips.length === 0 && status === 'ready' && (
                             <div className="mt-4 p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
                                 <h4 className="font-bold text-blue-900 mb-3 text-center">解析方法を選択してください</h4>
                                 <div className="flex gap-3 justify-center flex-wrap">
-                                    <button
-                                        onClick={() => {
-                                            setStatus('analyzing');
-                                            setMessage('AIが動画を分析中...');
-                                            analyzeVideo(vttFilename, 0);
-                                        }}
-                                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                        </svg>
-                                        AI解析
-                                    </button>
+                                    {vttFilename && (
+                                        <button
+                                            onClick={() => {
+                                                setStatus('analyzing');
+                                                setMessage('AIが動画を分析中...');
+                                                analyzeVideo(vttFilename, 0);
+                                            }}
+                                            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                            </svg>
+                                            AI解析
+                                        </button>
+                                    )}
                                     {videoInfo?.has_comments && (
                                         <>
                                             <button
@@ -714,6 +763,11 @@ function YouTubeClipCreator() {
                                 {!videoInfo?.has_comments && (
                                     <p className="text-sm text-gray-600 mt-3 text-center">
                                         ※ コメント解析を使用するには、動画ダウンロード時に「コメント/チャットも取得」にチェックを入れてください
+                                    </p>
+                                )}
+                                {!vttFilename && videoInfo?.has_comments && (
+                                    <p className="text-sm text-gray-600 mt-3 text-center">
+                                        ※ 文字起こしデータがないため、AI解析は使用できません（コメント解析のみ可能です）
                                     </p>
                                 )}
                             </div>
@@ -765,6 +819,13 @@ function YouTubeClipCreator() {
                                     概要欄を生成
                                 </button>
                                 <button
+                                    onClick={generateTwitterPR}
+                                    className="bg-sky-500 text-white px-4 py-2 rounded hover:bg-sky-600 flex items-center gap-1"
+                                >
+                                    <span>🐦</span>
+                                    PR文章を生成
+                                </button>
+                                <button
                                     onClick={addManualClip}
                                     className="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300"
                                 >
@@ -802,7 +863,13 @@ function YouTubeClipCreator() {
                 initialDescription={generatedDescription}
                 detectedMembers={detectedMembers}
             />
-        </div >
+
+            <TwitterModal
+                isOpen={isTwitterModalOpen}
+                onClose={() => setIsTwitterModalOpen(false)}
+                initialText={twitterPrText}
+            />
+        </div>
     );
 }
 

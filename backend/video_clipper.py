@@ -1,9 +1,10 @@
 import subprocess
 import os
 
-def extract_clip(video_path: str, start: float, end: float, output_path: str):
+def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None):
     """
     Extracts a clip from the video using ffmpeg.
+    crop_params: dict with keys 'x', 'y', 'width', 'height' (optional)
     """
     try:
         # Ensure absolute paths
@@ -12,17 +13,33 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str):
         
         duration = end - start
         
+        # Build filter chain
+        filters = []
+        if crop_params:
+            x = int(crop_params.get('x', 0))
+            y = int(crop_params.get('y', 0))
+            w = int(crop_params.get('width', 0))
+            h = int(crop_params.get('height', 0))
+            if w > 0 and h > 0:
+                filters.append(f"crop={w}:{h}:{x}:{y}")
+                
         cmd = [
             "ffmpeg",
             "-y",
             "-ss", str(start),
             "-i", video_path,
-            "-t", str(duration),
+            "-t", str(duration)
+        ]
+
+        if filters:
+            cmd.extend(["-vf", ",".join(filters)])
+            
+        cmd.extend([
             "-c:v", "libx264", # Re-encode to ensure accurate cutting and compatibility
             "-c:a", "aac",
             "-strict", "experimental",
             output_path
-        ]
+        ])
         
         print(f"Running ffmpeg: {' '.join(cmd)}")
         # Capture output to prevent Broken Pipe if stdout is closed

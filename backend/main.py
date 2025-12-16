@@ -503,7 +503,8 @@ async def analyze_video(request: AnalyzeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 class AnalyzeKusaRequest(BaseModel):
-    vtt_filename: str
+    vtt_filename: Optional[str] = None
+    video_filename: Optional[str] = None
     clip_duration: int = 60  # 1-minute clips by default
 
 @app.post("/youtube/analyze-kusa")
@@ -513,20 +514,30 @@ async def analyze_kusa_clips(request: AnalyzeKusaRequest):
     Returns top 10 clips with highest kusa emoji density per minute.
     """
     try:
-        vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
-        if not os.path.exists(vtt_path):
-            raise HTTPException(status_code=404, detail="Subtitle file not found")
-
-        # Find video file to get duration
-        base_path = os.path.splitext(vtt_path)[0]
+        base_name = None
         video_path = None
-        for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
-            candidate = base_path + ext
-            if os.path.exists(candidate):
-                video_path = candidate
-                break
+        
+        # Determine base name and video path
+        if request.vtt_filename:
+            vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
+            base_name = os.path.splitext(request.vtt_filename)[0]
+        elif request.video_filename:
+            video_path = os.path.join(UPLOAD_DIR, request.video_filename)
+            base_name = os.path.splitext(request.video_filename)[0]
+        else:
+            raise HTTPException(status_code=400, detail="Either vtt_filename or video_filename must be provided")
 
+        # Find video file if not already found
         if not video_path:
+            # Find video file to get duration
+            # base_name is from vtt, so try extensions
+            for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
+                candidate = os.path.join(UPLOAD_DIR, base_name + ext)
+                if os.path.exists(candidate):
+                    video_path = candidate
+                    break
+
+        if not video_path or not os.path.exists(video_path):
             raise HTTPException(status_code=404, detail="Video file not found")
 
         # Get video duration
@@ -534,7 +545,6 @@ async def analyze_kusa_clips(request: AnalyzeKusaRequest):
         video_duration = video_info['duration']
 
         # Find comments file
-        base_name = os.path.splitext(request.vtt_filename)[0]
         live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
         info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
 
@@ -579,7 +589,8 @@ async def analyze_kusa_clips(request: AnalyzeKusaRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 class AnalyzeCommentDensityRequest(BaseModel):
-    vtt_filename: str
+    vtt_filename: Optional[str] = None
+    video_filename: Optional[str] = None
     clip_duration: int = 60  # 1-minute clips by default
 
 @app.post("/youtube/analyze-comment-density")
@@ -589,20 +600,28 @@ async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
     Returns top 10 clips with highest comment count.
     """
     try:
-        vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
-        if not os.path.exists(vtt_path):
-            raise HTTPException(status_code=404, detail="Subtitle file not found")
-
-        # Find video file to get duration
-        base_path = os.path.splitext(vtt_path)[0]
+        base_name = None
         video_path = None
-        for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
-            candidate = base_path + ext
-            if os.path.exists(candidate):
-                video_path = candidate
-                break
+        
+        # Determine base name and video path
+        if request.vtt_filename:
+            vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
+            base_name = os.path.splitext(request.vtt_filename)[0]
+        elif request.video_filename:
+            video_path = os.path.join(UPLOAD_DIR, request.video_filename)
+            base_name = os.path.splitext(request.video_filename)[0]
+        else:
+            raise HTTPException(status_code=400, detail="Either vtt_filename or video_filename must be provided")
 
+        # Find video file if not already found
         if not video_path:
+            for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
+                candidate = os.path.join(UPLOAD_DIR, base_name + ext)
+                if os.path.exists(candidate):
+                    video_path = candidate
+                    break
+
+        if not video_path or not os.path.exists(video_path):
             raise HTTPException(status_code=404, detail="Video file not found")
 
         # Get video duration
@@ -610,7 +629,6 @@ async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
         video_duration = video_info['duration']
 
         # Find comments file
-        base_name = os.path.splitext(request.vtt_filename)[0]
         live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
         info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
 
@@ -751,6 +769,10 @@ class ClipRequest(BaseModel):
     start: float
     end: float
     title: str
+    crop_x: Optional[float] = None
+    crop_y: Optional[float] = None
+    crop_width: Optional[float] = None
+    crop_height: Optional[float] = None
 
 @app.post("/youtube/create-clip")
 async def create_clip(request: ClipRequest):
@@ -764,7 +786,16 @@ async def create_clip(request: ClipRequest):
         output_filename = f"{base_name}_clip_{safe_title}.mp4"
         output_path = os.path.join(UPLOAD_DIR, output_filename)
 
-        extract_clip(video_path, request.start, request.end, output_path)
+        crop_params = None
+        if request.crop_width is not None and request.crop_height is not None:
+            crop_params = {
+                'x': request.crop_x or 0,
+                'y': request.crop_y or 0,
+                'width': request.crop_width,
+                'height': request.crop_height
+            }
+
+        extract_clip(video_path, request.start, request.end, output_path, crop_params=crop_params)
 
         return {
             "video_url": f"/static/{output_filename}",
@@ -885,6 +916,7 @@ async def test_clip_detector():
     }
 
 from .description_generator import generate_description, detect_members, get_all_members
+from .twitter_generator import generate_twitter_pr_text
 
 class DescriptionRequest(BaseModel):
     original_url: str
@@ -915,6 +947,28 @@ async def generate_video_description(request: DescriptionRequest):
         }
     except Exception as e:
         logger.error(f"Error generating description: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class TwitterPRRequest(BaseModel):
+    original_url: str
+    original_title: str
+    video_description: str = ""
+    clip_title: Optional[str] = None
+
+@app.post("/generate-twitter-pr")
+async def generate_twitter_pr(request: TwitterPRRequest):
+    """Generate Twitter PR text for Hololive clip"""
+    try:
+        pr_text = generate_twitter_pr_text(
+            original_url=request.original_url,
+            original_title=request.original_title,
+            clip_title=request.clip_title,
+            video_description=request.video_description
+        )
+
+        return {"pr_text": pr_text}
+    except Exception as e:
+        logger.error(f"Error generating Twitter PR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/hololive-members")

@@ -1,14 +1,85 @@
 import React, { useState, useRef, useEffect } from 'react';
 
+// Helper to get coordinates relative to an element
+const getRelativePos = (e, element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+    };
+};
+
 function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating }) {
     const videoRef = useRef(null);
+    const containerRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [localClip, setLocalClip] = useState(clip);
     const [currentTime, setCurrentTime] = useState(0);
 
+    // Crop state
+    const [showCrop, setShowCrop] = useState(false);
+    const [cropMode, setCropMode] = useState('horizontal'); // 'horizontal' (16:9) or 'vertical' (9:16)
+    const [cropRect, setCropRect] = useState(null); // { x, y, width, height } in percentages (0-100)
+    const [isDragging, setIsDragging] = useState(false);
+    const [dragStart, setDragStart] = useState(null); // { x, y } in pixels
+    const [rectStart, setRectStart] = useState(null); // { x, y } in percentages
+
+    // Video natural dimensions
+    const [videoDims, setVideoDims] = useState({ width: 0, height: 0 });
+
     useEffect(() => {
         setLocalClip(clip);
+        if (clip.crop_width) {
+            setShowCrop(true);
+        }
     }, [clip]);
+
+    // Recalculate crop when video dimensions are loaded to ensure aspect ratio is correct
+    useEffect(() => {
+        const dims = getSafeVideoDims();
+        const hasRealDims = videoRef.current && videoRef.current.videoWidth > 0;
+
+        // Sync state if needed (fixes container aspect ratio)
+        if (hasRealDims) {
+            if (videoDims.width !== videoRef.current.videoWidth || videoDims.height !== videoRef.current.videoHeight) {
+                setVideoDims({
+                    width: videoRef.current.videoWidth,
+                    height: videoRef.current.videoHeight
+                });
+                return; // Let re-render handle the rest
+            }
+        }
+
+        if (!hasRealDims && !videoDims.width) return;
+
+        if (localClip.crop_width && showCrop) {
+            const currentDims = hasRealDims ? { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight } : videoDims;
+            // Restore from saved pixels
+            const x = (localClip.crop_x / currentDims.width) * 100;
+            const y = (localClip.crop_y / currentDims.height) * 100;
+            const w = (localClip.crop_width / currentDims.width) * 100;
+            const h = (localClip.crop_height / currentDims.height) * 100;
+            setCropRect({ x, y, width: w, height: h });
+        } else if (showCrop && hasRealDims) {
+            // If active and we just got dimensions, re-init to ensure correct aspect
+            initCropRect(cropMode);
+        }
+    }, [videoDims.width, videoDims.height, videoRef.current?.readyState]); // Use readyState to trigger check
+
+    const handleLoadedMetadata = () => {
+        if (videoRef.current) {
+            setVideoDims({
+                width: videoRef.current.videoWidth,
+                height: videoRef.current.videoHeight
+            });
+        }
+    };
+
+    useEffect(() => {
+        if (videoRef.current && videoRef.current.readyState >= 1) {
+            handleLoadedMetadata();
+        }
+    }, [videoUrl]);
 
     const handleTimeUpdate = () => {
         if (videoRef.current) {
@@ -49,6 +120,235 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
         onUpdate(updated);
     };
 
+    // Crop Logic
+    const toggleCrop = () => {
+        const newState = !showCrop;
+        setShowCrop(newState);
+
+        if (newState && !cropRect) {
+            // Initialize crop rect centered
+            initCropRect(cropMode);
+        } else if (!newState) {
+            // Clear crop data from clip when disabled
+            const updated = { ...localClip };
+            delete updated.crop_x;
+            delete updated.crop_y;
+            delete updated.crop_width;
+            delete updated.crop_height;
+            setLocalClip(updated);
+            onUpdate(updated);
+        }
+    };
+
+    const getSafeVideoDims = () => {
+        if (videoDims.width && videoDims.height) return videoDims;
+        if (videoRef.current && videoRef.current.videoWidth) {
+            return {
+                width: videoRef.current.videoWidth,
+                height: videoRef.current.videoHeight
+            };
+        }
+        return { width: 16, height: 9 }; // Fallback
+    };
+
+    const initCropRect = (mode) => {
+        let containerAspect = 16 / 9;
+        if (containerRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            if (rect.width && rect.height) {
+                containerAspect = rect.width / rect.height;
+            }
+        } else if (videoDims.width && videoDims.height) {
+            containerAspect = videoDims.width / videoDims.height;
+        }
+
+        const targetAspect = mode === 'horizontal' ? 16 / 9 : 9 / 16;
+
+        // Start with a reasonable size (e.g., 80% width or height)
+        let w, h;
+
+        // We use a small epsilon for float comparison
+        if (containerAspect > targetAspect + 0.01) {
+            // Container is strictly wider than target.
+            // Fit by Height.
+            h = 60; // 60% of height
+            // W% = H% * (Target / Container)
+            w = h * (targetAspect / containerAspect);
+        } else {
+            // Container is narrower or equal (taller)
+            // Fit by Width.
+            w = 80; // 80% of width
+            // H% = W% * (Container / Target)
+            h = w * (containerAspect / targetAspect);
+        }
+
+        // Center it
+        const x = (100 - w) / 2;
+        const y = (100 - h) / 2;
+
+        const newRect = { x, y, width: w, height: h };
+        setCropRect(newRect);
+        updateClipCrop(newRect);
+    };
+
+    const handleCropModeChange = (mode) => {
+        setCropMode(mode);
+        initCropRect(mode);
+    };
+
+    // Drag and Resize Implementation
+    const [resizeHandle, setResizeHandle] = useState(null); // 'nw', 'ne', 'sw', 'se' or null
+
+    const updateClipCrop = (rect) => {
+        const dims = getSafeVideoDims();
+        if (!dims.width || dims.width <= 16) return;
+
+        // Ensure aspect ratio consistency in output
+        const currentAspect = cropMode === 'horizontal' ? 16 / 9 : 9 / 16;
+
+        // Convert percentages to pixels for the video
+        let cropW = Math.round((rect.width / 100) * dims.width);
+        // Force Height based on Width to ensure strict aspect match (within 1px)
+        let cropH = Math.round(cropW / currentAspect);
+
+        // Re-check bounds (if H pushed us out, adjust W instead?) 
+        // For simplicity, just clamp loop or trust the rounding.
+        if (cropH > dims.height) {
+            cropH = dims.height;
+            cropW = Math.round(cropH * currentAspect);
+        }
+
+        const cropX = Math.round((rect.x / 100) * dims.width);
+        const cropY = Math.round((rect.y / 100) * dims.height);
+
+        const updated = {
+            ...localClip,
+            crop_x: cropX,
+            crop_y: cropY,
+            crop_width: cropW,
+            crop_height: cropH
+        };
+        setLocalClip(updated);
+        onUpdate(updated);
+    };
+
+    const onMouseDown = (e, handle = null) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        setDragStart({ x: e.clientX, y: e.clientY });
+        setRectStart({ ...cropRect });
+        if (handle) {
+            setResizeHandle(handle);
+        } else {
+            setIsDragging(true);
+        }
+    };
+
+    useEffect(() => {
+        const onMouseMove = (e) => {
+            if (!isDragging && !resizeHandle) return;
+
+            e.preventDefault();
+
+            const rect = containerRef.current.getBoundingClientRect();
+            const deltaXPx = e.clientX - dragStart.x;
+            const deltaYPx = e.clientY - dragStart.y;
+
+            // Convert pixel delta to percentage delta
+            const deltaX = (deltaXPx / rect.width) * 100;
+            const deltaY = (deltaYPx / rect.height) * 100;
+
+            if (isDragging) {
+                let newX = rectStart.x + deltaX;
+                let newY = rectStart.y + deltaY;
+
+                // Constrain to bounds
+                newX = Math.max(0, Math.min(100 - cropRect.width, newX));
+
+                newY = Math.max(0, Math.min(100 - cropRect.height, newY));
+
+                setCropRect({ ...cropRect, x: newX, y: newY });
+            } else if (resizeHandle) {
+                const currentAspect = cropMode === 'horizontal' ? 16 / 9 : 9 / 16;
+                const dims = getSafeVideoDims();
+                const videoAspect = dims.width && dims.height ? dims.width / dims.height : 16 / 9;
+
+                // Factor to convert Width% change to Height% change to maintain aspect ratio
+                // H% = W% * (VideoAspect / TargetAspect)
+                const K = videoAspect / currentAspect;
+
+                let newX = rectStart.x;
+                let newY = rectStart.y;
+                let newW = rectStart.width;
+                let newH = rectStart.height;
+
+                // Simple X-axis driven resize (reverted from multi-axis)
+                let dW = deltaX;
+
+                // Invert delta for left-side handles
+                if (resizeHandle === 'sw' || resizeHandle === 'nw') {
+                    dW = -dW;
+                }
+
+                newW = rectStart.width + dW;
+                newH = newW * K;
+
+                // Min size check relative to video
+                // 16px min width seems reasonable
+                const minWPercent = (16 / dims.width) * 100;
+                if (newW < minWPercent) {
+                    newW = minWPercent;
+                    newH = newW * K;
+                }
+
+                // Apply changes based on handle position
+                if (resizeHandle === 'se') {
+                    // Top-Left fixed, grow right/down
+                } else if (resizeHandle === 'sw') {
+                    // Top-Right fixed, grow left/down
+                    newX = rectStart.x - (newW - rectStart.width);
+                } else if (resizeHandle === 'ne') {
+                    // Bottom-Left fixed, grow right/up
+                    newY = rectStart.y - (newH - rectStart.height);
+                } else if (resizeHandle === 'nw') {
+                    // Bottom-Right fixed, grow left/up
+                    newX = rectStart.x - (newW - rectStart.width);
+                    newY = rectStart.y - (newH - rectStart.height);
+                }
+
+                // Bounds checks could go here, but clamping width usually sufficient for drag
+                // If X/Y go out of bounds, we might want to clamp them and adjust W/H back?
+                // For now, simple clamping of X/Y to valid range (0-100) done in effect loop?
+                // Actually we just set them.
+
+                // Basic clamp for position 
+                // Note: This doesn't prevent growing off-screen, but prevents moving off-screen.
+                // ideally we clamp (newX + newW) <= 100 etc.
+
+                setCropRect({ x: newX, y: newY, width: newW, height: newH });
+            }
+        };
+
+        const onMouseUp = () => {
+            if (isDragging || resizeHandle) {
+                setIsDragging(false);
+                setResizeHandle(null);
+                updateClipCrop(cropRect);
+            }
+        };
+
+        if (isDragging || resizeHandle) {
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+        }
+
+        return () => {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+    }, [isDragging, resizeHandle, dragStart, rectStart, cropRect, cropMode, videoDims]);
+
     const renderStars = (score) => {
         return '⭐️'.repeat(score || 0);
     };
@@ -57,20 +357,66 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
         <div className="bg-white rounded-lg shadow p-4 mb-4 border border-gray-200">
             <div className="flex flex-col md:flex-row gap-4">
                 {/* Video Preview */}
-                <div className="w-full md:w-1/3 bg-black rounded overflow-hidden relative aspect-video">
+                <div
+                    ref={containerRef}
+                    className="w-full md:w-1/3 bg-black rounded overflow-hidden relative self-start"
+                    style={{
+                        // Remove manual aspect ratio, let video define height
+                    }}
+                >
                     <video
                         ref={videoRef}
                         src={videoUrl}
-                        className="w-full h-full object-contain"
+                        className="w-full h-auto block" // h-auto lets video determine height
                         onTimeUpdate={handleTimeUpdate}
+                        onLoadedMetadata={handleLoadedMetadata}
                         onPause={() => setIsPlaying(false)}
                         onPlay={() => setIsPlaying(true)}
                     />
+
+                    {/* Crop Overlay */}
+                    {
+                        showCrop && cropRect && (
+                            <div
+                                className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"
+                                style={{
+                                    left: `${cropRect.x}%`,
+                                    top: `${cropRect.y}%`,
+                                    width: `${cropRect.width}%`,
+                                    height: `${cropRect.height}%`,
+                                }}
+                                onMouseDown={(e) => onMouseDown(e)}
+                            >
+                                {/* Drag Handle (Move) - Full area or specific handle? Full area typically used for move */}
+                                <div className="absolute inset-0 cursor-move"></div>
+
+                                {/* Center crosshair */}
+                                <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
+                                    <div className="w-4 h-4 border-t-2 border-l-2 border-white"></div>
+                                </div>
+
+                                {/* Resize Handles */}
+                                {['nw', 'ne', 'sw', 'se'].map(h => (
+                                    <div
+                                        key={h}
+                                        className={`absolute w-3 h-3 bg-white border border-gray-500 rounded-full z-10
+                                        ${h === 'nw' ? '-top-1.5 -left-1.5 cursor-nw-resize' : ''}
+                                        ${h === 'ne' ? '-top-1.5 -right-1.5 cursor-ne-resize' : ''}
+                                        ${h === 'sw' ? '-bottom-1.5 -left-1.5 cursor-sw-resize' : ''}
+                                        ${h === 'se' ? '-bottom-1.5 -right-1.5 cursor-se-resize' : ''}
+                                    `}
+                                        onMouseDown={(e) => onMouseDown(e, h)}
+                                    ></div>
+                                ))}
+                            </div>
+                        )
+                    }
+
                     {/* Time Display */}
-                    <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs font-mono">
+                    <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs font-mono z-10">
                         {formatTime(currentTime)} / {formatTime(localClip.end - localClip.start)}
                     </div>
-                    <div className="absolute bottom-2 right-2 flex space-x-2">
+                    <div className="absolute bottom-2 right-2 flex space-x-2 z-10">
                         {!isPlaying ? (
                             <button
                                 onClick={playPreview}
@@ -92,10 +438,10 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                             </button>
                         )}
                     </div>
-                </div>
+                </div >
 
                 {/* Controls */}
-                <div className="w-full md:w-2/3 space-y-3">
+                < div className="w-full md:w-2/3 space-y-3" >
                     <div>
                         <label className="block text-sm font-medium text-gray-700">タイトル</label>
                         <input
@@ -104,6 +450,49 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                             onChange={(e) => handleChange('title', e.target.value)}
                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
                         />
+                    </div>
+
+                    {/* Crop Controls */}
+                    <div className="bg-gray-50 p-3 rounded border border-gray-200">
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={showCrop}
+                                    onChange={toggleCrop}
+                                    className="rounded text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-sm font-medium text-gray-700">切り抜き（クロップ）を有効にする</span>
+                            </label>
+                        </div>
+
+                        {showCrop && (
+                            <div className="flex flex-col gap-2">
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => handleCropModeChange('horizontal')}
+                                        className={`flex-1 py-1 px-2 text-sm rounded border ${cropMode === 'horizontal'
+                                            ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                            : 'bg-white border-gray-300 text-gray-600'
+                                            }`}
+                                    >
+                                        横 (16:9)
+                                    </button>
+                                    <button
+                                        onClick={() => handleCropModeChange('vertical')}
+                                        className={`flex-1 py-1 px-2 text-sm rounded border ${cropMode === 'vertical'
+                                            ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                            : 'bg-white border-gray-300 text-gray-600'
+                                            }`}
+                                    >
+                                        縦 (9:16)
+                                    </button>
+                                </div>
+                                <div className="text-xs text-gray-500 text-center">
+                                    出力解像度: {localClip.crop_width || 0} x {localClip.crop_height || 0} px
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -213,29 +602,33 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                     </div>
 
                     {/* AI Evaluation Section */}
-                    {localClip.evaluation_score && (
-                        <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mt-2">
-                            <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-700">AIオススメ度:</span>
-                                <span className="text-lg">{renderStars(localClip.evaluation_score)}</span>
+                    {
+                        localClip.evaluation_score && (
+                            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mt-2">
+                                <div className="flex items-center justify-between mb-1">
+                                    <span className="text-sm font-medium text-gray-700">AIオススメ度:</span>
+                                    <span className="text-lg">{renderStars(localClip.evaluation_score)}</span>
+                                </div>
+                                <p className="text-xs text-gray-600">{localClip.evaluation_reason}</p>
                             </div>
-                            <p className="text-xs text-gray-600">{localClip.evaluation_reason}</p>
-                        </div>
-                    )}
+                        )
+                    }
 
                     {/* Comment Count Section */}
-                    {localClip.comment_count !== undefined && (
-                        <div className="bg-blue-50 border border-blue-200 rounded p-3 mt-2">
-                            <div className="flex items-center gap-2">
-                                <span className="text-lg">💬</span>
-                                <span className="text-sm font-medium text-gray-700">コメント数:</span>
-                                <span className="text-lg font-bold text-blue-700">{localClip.comment_count}</span>
-                                <span className="text-sm text-gray-600 ml-2">
-                                    ({localClip.comments_per_minute !== undefined ? localClip.comments_per_minute : ((localClip.comment_count / (localClip.end - localClip.start)) * 60).toFixed(1)}/分)
-                                </span>
+                    {
+                        localClip.comment_count !== undefined && (
+                            <div className="bg-blue-50 border border-blue-200 rounded p-3 mt-2">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg">💬</span>
+                                    <span className="text-sm font-medium text-gray-700">コメント数:</span>
+                                    <span className="text-lg font-bold text-blue-700">{localClip.comment_count}</span>
+                                    <span className="text-sm text-gray-600 ml-2">
+                                        ({localClip.comments_per_minute !== undefined ? localClip.comments_per_minute : ((localClip.comment_count / (localClip.end - localClip.start)) * 60).toFixed(1)}/分)
+                                    </span>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        )
+                    }
 
                     <div className="flex justify-end space-x-3 pt-2">
                         <button
@@ -265,9 +658,9 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                             )}
                         </button>
                     </div>
-                </div>
-            </div>
-        </div>
+                </div >
+            </div >
+        </div >
     );
 }
 
