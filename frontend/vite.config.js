@@ -17,6 +17,7 @@ export default defineConfig({
       '/youtube': 'http://127.0.0.1:8000',
       '/progress': 'http://127.0.0.1:8000',
       '/generate-description': 'http://127.0.0.1:8000',
+      '/generate-twitter-pr': 'http://127.0.0.1:8000',
       '/hololive-members': 'http://127.0.0.1:8000',
     },
   },

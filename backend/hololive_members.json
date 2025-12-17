@@ -5,6 +5,7 @@
       "name_en": "Tokino Sora",
       "channel_url": "https://www.youtube.com/@TokinoSora",
       "generation": "0期生",
+      "fan_name": "そらとも",
       "keywords": [
         "ときのそら",
         "そらちゃん",
@@ -16,6 +17,7 @@
       "name_en": "AZKi",
       "channel_url": "https://www.youtube.com/@AZKi",
       "generation": "0期生",
+      "fan_name": "開拓者",
       "keywords": [
         "AZKi",
         "あずき"
@@ -26,6 +28,7 @@
       "name_en": "Roboco",
       "channel_url": "https://www.youtube.com/@Robocosan",
       "generation": "0期生",
+      "fan_name": "ロボサー",
       "keywords": [
         "ロボ子",
         "Roboco"
@@ -36,6 +39,7 @@
       "name_en": "Sakura Miko",
       "channel_url": "https://www.youtube.com/@SakuraMiko",
       "generation": "0期生",
+      "fan_name": "35P",
       "keywords": [
         "さくらみこ",
         "みこち",
@@ -47,6 +51,7 @@
       "name_en": "Hoshimachi Suisei",
       "channel_url": "https://www.youtube.com/@HoshimachiSuisei",
       "generation": "0期生",
+      "fan_name": "星詠み",
       "keywords": [
         "星街すいせい",
         "すいせい",
@@ -59,6 +64,7 @@
       "name_en": "Yozora Mel",
       "channel_url": "https://www.youtube.com/@YozoraMel",
       "generation": "1期生",
+      "fan_name": "かぷ民",
       "keywords": [
         "夜空メル",
         "メル",
@@ -70,6 +76,7 @@
       "name_en": "Aki Rosenthal",
       "channel_url": "https://www.youtube.com/@AkiRosenthal",
       "generation": "1期生",
+      "fan_name": "ロゼ隊",
       "keywords": [
         "アキ",
         "アキロゼ",
@@ -81,6 +88,7 @@
       "name_en": "Akai Haato",
       "channel_url": "https://www.youtube.com/@AkaiHaato",
       "generation": "1期生",
+      "fan_name": "はあとん",
       "keywords": [
         "赤井はあと",
         "はあと",
@@ -93,6 +101,7 @@
       "name_en": "Shirakami Fubuki",
       "channel_url": "https://www.youtube.com/@ShirakamiFubuki",
       "generation": "1期生",
+      "fan_name": "すこん部",
       "keywords": [
         "白上フブキ",
         "フブキ",
@@ -105,6 +114,7 @@
       "name_en": "Natsuiro Matsuri",
       "channel_url": "https://www.youtube.com/@NatsuiroMatsuri",
       "generation": "1期生",
+      "fan_name": "まつりす",
       "keywords": [
         "夏色まつり",
         "まつり",
@@ -116,6 +126,7 @@
       "name_en": "Minato Aqua",
       "channel_url": "https://www.youtube.com/@MinatoAqua",
       "generation": "2期生",
+      "fan_name": "あくあクルー",
       "keywords": [
         "湊あくあ",
         "あくあ",
@@ -128,6 +139,7 @@
       "name_en": "Murasaki Shion",
       "channel_url": "https://www.youtube.com/@MurasakiShion",
       "generation": "2期生",
+      "fan_name": "塩っ子",
       "keywords": [
         "紫咲シオン",
         "シオン",
@@ -139,6 +151,7 @@
       "name_en": "Nakiri Ayame",
       "channel_url": "https://www.youtube.com/@NakiriAyame",
       "generation": "2期生",
+      "fan_name": "百鬼組",
       "keywords": [
         "百鬼あやめ",
         "あやめ",
@@ -150,6 +163,7 @@
       "name_en": "Yuzuki Choco",
       "channel_url": "https://www.youtube.com/@YuzukiChoco",
       "generation": "2期生",
+      "fan_name": "ちょこMate",
       "keywords": [
         "癒月ちょこ",
         "ちょこ",
@@ -162,6 +176,7 @@
       "name_en": "Oozora Subaru",
       "channel_url": "https://www.youtube.com/@OozoraSubaru",
       "generation": "2期生",
+      "fan_name": "スバ友",
       "keywords": [
         "大空スバル",
         "スバル",
@@ -173,6 +188,7 @@
       "name_en": "Usada Pekora",
       "channel_url": "https://www.youtube.com/@UsadaPekora",
       "generation": "3期生",
+      "fan_name": "野うさぎ",
       "keywords": [
         "兎田ぺこら",
         "ぺこら",
@@ -185,6 +201,7 @@
       "name_en": "Uruha Rushia",
       "channel_url": "https://www.youtube.com/@UruhaRushia",
       "generation": "3期生",
+      "fan_name": "ふぁんでっど",
       "keywords": [
         "潤羽るしあ",
         "るしあ",
@@ -196,6 +213,7 @@
       "name_en": "Shiranui Flare",
       "channel_url": "https://www.youtube.com/@ShiranuiFlare",
       "generation": "3期生",
+      "fan_name": "エルフレ",
       "keywords": [
         "不知火フレア",
         "フレア",
@@ -207,6 +225,7 @@
       "name_en": "Shirogane Noel",
       "channel_url": "https://www.youtube.com/@ShiroganeNoel",
       "generation": "3期生",
+      "fan_name": "白銀聖騎士団",
       "keywords": [
         "白銀ノエル",
         "ノエル",
@@ -218,6 +237,7 @@
       "name_en": "Houshou Marine",
       "channel_url": "https://www.youtube.com/@HoushouMarine",
       "generation": "3期生",
+      "fan_name": "宝鐘の一味",
       "keywords": [
         "宝鐘マリン",
         "マリン",
@@ -230,6 +250,7 @@
       "name_en": "Amane Kanata",
       "channel_url": "https://www.youtube.com/@AmaneKanata",
       "generation": "4期生",
+      "fan_name": "へい民",
       "keywords": [
         "天音かなた",
         "かなた",
@@ -241,6 +262,7 @@
       "name_en": "Tsunomaki Watame",
       "channel_url": "https://www.youtube.com/@TsunomakiWatame",
       "generation": "4期生",
+      "fan_name": "わためいと",
       "keywords": [
         "角巻わため",
         "わため",
@@ -252,6 +274,7 @@
       "name_en": "Tokoyami Towa",
       "channel_url": "https://www.youtube.com/@TokoyamiTowa",
       "generation": "4期生",
+      "fan_name": "常闇眷属",
       "keywords": [
         "常闇トワ",
         "トワ",
@@ -263,6 +286,7 @@
       "name_en": "Himemori Luna",
       "channel_url": "https://www.youtube.com/@HimemoriLuna",
       "generation": "4期生",
+      "fan_name": "ルーナイト",
       "keywords": [
         "姫森ルーナ",
         "ルーナ",
@@ -274,6 +298,7 @@
       "name_en": "Yukihana Lamy",
       "channel_url": "https://www.youtube.com/@YukihanaLamy",
       "generation": "ねぽらぼ",
+      "fan_name": "雪民",
       "keywords": [
         "雪花ラミィ",
         "ラミィ",
@@ -285,6 +310,7 @@
       "name_en": "Momosuzu Nene",
       "channel_url": "https://www.youtube.com/@MomosuzuNene",
       "generation": "ねぽらぼ",
+      "fan_name": "ねっ子",
       "keywords": [
         "桃鈴ねね",
         "ねね",
@@ -297,6 +323,7 @@
       "name_en": "Shishiro Botan",
       "channel_url": "https://www.youtube.com/@ShishiroBotan",
       "generation": "ねぽらぼ",
+      "fan_name": "SSRB",
       "keywords": [
         "獅白ぼたん",
         "ぼたん",
@@ -308,6 +335,7 @@
       "name_en": "Omaru Polka",
       "channel_url": "https://www.youtube.com/@OmaruPolka",
       "generation": "ねぽらぼ",
+      "fan_name": "座員",
       "keywords": [
         "尾丸ポルカ",
         "ポルカ",
@@ -319,6 +347,7 @@
       "name_en": "La+ Darknesss",
       "channel_url": "https://www.youtube.com/@LaplusDarknesss",
       "generation": "holoX",
+      "fan_name": "ぷらすめいと",
       "keywords": [
         "ラプラス",
         "ラプちゃん",
@@ -330,6 +359,7 @@
       "name_en": "Takane Lui",
       "channel_url": "https://www.youtube.com/@TakaneLui",
       "generation": "holoX",
+      "fan_name": "ルイ友",
       "keywords": [
         "鷹嶺ルイ",
         "ルイ",
@@ -341,6 +371,7 @@
       "name_en": "Hakui Koyori",
       "channel_url": "https://www.youtube.com/@HakuiKoyori",
       "generation": "holoX",
+      "fan_name": "助手くん",
       "keywords": [
         "博衣こより",
         "こより",
@@ -352,6 +383,7 @@
       "name_en": "Sakamata Chloe",
       "channel_url": "https://www.youtube.com/@SakamataChloe",
       "generation": "holoX",
+      "fan_name": "飼育員",
       "keywords": [
         "沙花叉クロヱ",
         "クロヱ",
@@ -363,6 +395,7 @@
       "name_en": "Kazama Iroha",
       "channel_url": "https://www.youtube.com/@KazamaIroha",
       "generation": "holoX",
+      "fan_name": "かざま隊",
       "keywords": [
         "風真いろは",
         "いろは",
@@ -374,6 +407,7 @@
       "name_en": "Nekomata Okayu",
       "channel_url": "https://www.youtube.com/@NekomataOkayu",
       "generation": "GAMERS",
+      "fan_name": "おにぎりゃー",
       "keywords": [
         "猫又おかゆ",
         "おかゆ",
@@ -385,6 +419,7 @@
       "name_en": "Inugami Korone",
       "channel_url": "https://www.youtube.com/@InugamiKorone",
       "generation": "GAMERS",
+      "fan_name": "ころねすきー",
       "keywords": [
         "戌神ころね",
         "ころね",
@@ -396,6 +431,7 @@
       "name_en": "Hiodoshi Ao",
       "channel_url": "https://www.youtube.com/@HiodoshiAo",
       "generation": "ReGLOSS",
+      "fan_name": "読者",
       "keywords": [
         "火威青",
         "あお",
@@ -407,6 +443,7 @@
       "name_en": "Otonose Kanade",
       "channel_url": "https://www.youtube.com/@OtonoseKanade",
       "generation": "ReGLOSS",
+      "fan_name": "音の勢",
       "keywords": [
         "音乃瀬奏",
         "奏",
@@ -418,6 +455,7 @@
       "name_en": "Ichijou Ririka",
       "channel_url": "https://www.youtube.com/@IchijouRirika",
       "generation": "ReGLOSS",
+      "fan_name": "秘書見習い",
       "keywords": [
         "一条莉々華",
         "りりか",
@@ -429,6 +467,7 @@
       "name_en": "Juufuutei Raden",
       "channel_url": "https://www.youtube.com/@JuufuuteiRaden",
       "generation": "ReGLOSS",
+      "fan_name": "でん同士",
       "keywords": [
         "儒烏風亭らでん",
         "らでん",
@@ -440,6 +479,7 @@
       "name_en": "Todoroki Hajime",
       "channel_url": "https://www.youtube.com/@TodorokiHajime",
       "generation": "ReGLOSS",
+      "fan_name": "マッス組",
       "keywords": [
         "轟はじめ",
         "はじめ",
@@ -451,6 +491,7 @@
       "name_en": "Isaki Riona",
       "channel_url": "https://www.youtube.com/@IsakiRiona",
       "generation": "FLOW GLOW",
+      "fan_name": "伊崎連合",
       "keywords": [
         "響咲リオナ",
         "リオナ",
@@ -462,6 +503,7 @@
       "name_en": "Koganei Niko",
       "channel_url": "https://www.youtube.com/@KoganeiNiko",
       "generation": "FLOW GLOW",
+      "fan_name": "にこたん",
       "keywords": [
         "虎金妃笑虎",
         "にこ",
@@ -473,6 +515,7 @@
       "name_en": "Mizumiya Su",
       "channel_url": "https://www.youtube.com/@MizumiyaSu",
       "generation": "FLOW GLOW",
+      "fan_name": "すうりす",
       "keywords": [
         "水宮枢",
         "すう",
@@ -484,6 +527,7 @@
       "name_en": "Rindo Chihaya",
       "channel_url": "https://www.youtube.com/@RindoChihaya",
       "generation": "FLOW GLOW",
+      "fan_name": "にっく",
       "keywords": [
         "輪堂千速",
         "ちはや",
@@ -495,6 +539,7 @@
       "name_en": "Kikirara Vivi",
       "channel_url": "https://www.youtube.com/@KikiraraVivi",
       "generation": "FLOW GLOW",
+      "fan_name": "びびっど",
       "keywords": [
         "綺々羅々ヴィヴィ",
         "ヴィヴィ",
@@ -506,6 +551,7 @@
       "name_en": "Iduki Michiru",
       "channel_url": "https://www.youtube.com/@holoANroom",
       "generation": "holoAN",
+      "fan_name": "",
       "keywords": [
         "伊月みちる",
         "みちる",
@@ -517,6 +563,7 @@
       "name_en": "Hanazono Sayaka",
       "channel_url": "https://www.youtube.com/@holoANroom",
       "generation": "holoAN",
+      "fan_name": "",
       "keywords": [
         "花園さやか",
         "さやか",
