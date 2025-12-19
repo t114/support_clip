@@ -180,6 +180,7 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
     # Header
     ass_lines.append("[Script Info]")
     ass_lines.append("ScriptType: v4.00+")
+    ass_lines.append("WrapStyle: 0")
     ass_lines.append("PlayResX: 1920") 
     ass_lines.append("PlayResY: 1080")
     ass_lines.append("")
