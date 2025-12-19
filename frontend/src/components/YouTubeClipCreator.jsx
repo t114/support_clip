@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ClipPreview from './ClipPreview';
 import DescriptionModal from './DescriptionModal';
 import TwitterModal from './TwitterModal';
@@ -22,6 +22,7 @@ function YouTubeClipCreator() {
     const [creatingClipId, setCreatingClipId] = useState(null);
     const [startTime, setStartTime] = useState(0);
     const [withComments, setWithComments] = useState(false);
+    const [danmakuDensity, setDanmakuDensity] = useState(100); // 0 to 100%
 
     // Description modal state
     const [isDescriptionModalOpen, setIsDescriptionModalOpen] = useState(false);
@@ -32,6 +33,32 @@ function YouTubeClipCreator() {
     // Twitter modal state
     const [isTwitterModalOpen, setIsTwitterModalOpen] = useState(false);
     const [twitterPrText, setTwitterPrText] = useState('');
+
+    // Comments for Danmaku Preview
+    const [comments, setComments] = useState([]);
+
+    // Load comments when videoInfo is available and has comments
+    useEffect(() => {
+        if (videoInfo && videoInfo.has_comments && videoInfo.filename) {
+            console.log('Fetching comments for:', videoInfo.filename);
+            fetch(`/youtube/comments/${videoInfo.filename}`)
+                .then(res => {
+                    console.log('Comments API response status:', res.status);
+                    return res.json();
+                })
+                .then(data => {
+                    if (data.comments) {
+                        console.log(`Loaded ${data.comments.length} comments for preview`);
+                        setComments(data.comments);
+                    } else {
+                        console.warn('Comments API returned no comments array');
+                    }
+                })
+                .catch(err => console.error('Failed to load comments:', err));
+        } else if (!videoInfo) {
+            setComments([]);
+        }
+    }, [videoInfo]);
 
     // YouTube URLからt=パラメータを抽出
     const extractStartTimeFromUrl = (url) => {
@@ -456,7 +483,9 @@ function YouTubeClipCreator() {
                     crop_x: clip.crop_x,
                     crop_y: clip.crop_y,
                     crop_width: clip.crop_width,
-                    crop_height: clip.crop_height
+                    crop_height: clip.crop_height,
+                    with_danmaku: clip.with_danmaku,
+                    danmaku_density: clip.danmaku_density
                 })
             });
 
@@ -528,6 +557,21 @@ function YouTubeClipCreator() {
                         />
                         <span>コメント/チャットも取得して分析する（時間がかかる場合があります）</span>
                     </label>
+                    {withComments && (
+                        <div className="mt-2 flex items-center gap-4 pl-6">
+                            <span className="text-xs font-medium text-gray-600 whitespace-nowrap">コメント表示濃度:</span>
+                            <input
+                                type="range"
+                                min="1"
+                                max="100"
+                                step="1"
+                                value={danmakuDensity}
+                                onChange={(e) => setDanmakuDensity(parseInt(e.target.value))}
+                                className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-600"
+                            />
+                            <span className="text-xs font-bold text-red-600 w-8">{danmakuDensity}%</span>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-md border border-gray-200">
@@ -601,7 +645,14 @@ function YouTubeClipCreator() {
                 {videoInfo && (
                     <div className="mb-6 p-4 bg-gray-50 rounded border">
                         <h3 className="font-bold">{videoInfo.title}</h3>
-                        <p className="text-sm text-gray-600">長さ: {videoInfo.duration}秒</p>
+                        <div className="flex items-center gap-2 mt-1">
+                            <p className="text-sm text-gray-600">長さ: {videoInfo.duration}秒</p>
+                            {((videoInfo.has_comments || withComments)) && (
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${comments.length > 0 ? 'bg-green-100 text-green-700' : (videoInfo.has_comments ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}`}>
+                                    コメント: {videoInfo.has_comments ? (comments.length > 0 ? `${comments.length}件 ✓` : '読み込み中...') : 'データなし ✗'}
+                                </span>
+                            )}
+                        </div>
                         {totalSegments > 0 && (
                             <div className="mt-2">
                                 <div className="flex items-center gap-2">
@@ -844,6 +895,8 @@ function YouTubeClipCreator() {
                                     onDelete={deleteClip}
                                     onCreate={createClip}
                                     isCreating={creatingClipId === clip.id}
+                                    comments={comments}
+                                    danmakuDensity={danmakuDensity}
                                 />
                             ))}
                         </div>
