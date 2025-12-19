@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import DanmakuLayer from './DanmakuLayer';
 
 // Helper to get coordinates relative to an element
 const getRelativePos = (e, element) => {
@@ -9,12 +10,22 @@ const getRelativePos = (e, element) => {
     };
 };
 
-function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating }) {
+function ClipPreview({
+    clip,
+    videoUrl,
+    onUpdate,
+    onDelete,
+    onCreate,
+    isCreating,
+    comments,
+    danmakuDensity = 100
+}) {
     const videoRef = useRef(null);
     const containerRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [localClip, setLocalClip] = useState(clip);
     const [currentTime, setCurrentTime] = useState(0);
+    const [showDanmaku, setShowDanmaku] = useState(true);
 
     // Crop state
     const [showCrop, setShowCrop] = useState(false);
@@ -374,6 +385,15 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                         onPlay={() => setIsPlaying(true)}
                     />
 
+                    {/* Danmaku Overlay */}
+                    <DanmakuLayer
+                        comments={comments}
+                        currentTime={currentTime}
+                        enabled={showDanmaku}
+                        density={danmakuDensity}
+                        videoHeight={videoRef.current?.clientHeight || videoDims.height || 1080}
+                    />
+
                     {/* Crop Overlay */}
                     {
                         showCrop && cropRect && (
@@ -464,6 +484,17 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                                 />
                                 <span className="text-sm font-medium text-gray-700">切り抜き（クロップ）を有効にする</span>
                             </label>
+                            {comments && comments.length > 0 && (
+                                <label className="flex items-center gap-2 cursor-pointer ml-4">
+                                    <input
+                                        type="checkbox"
+                                        checked={showDanmaku}
+                                        onChange={(e) => setShowDanmaku(e.target.checked)}
+                                        className="rounded text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <span className="text-sm font-medium text-gray-700">コメントを表示</span>
+                                </label>
+                            )}
                         </div>
 
                         {showCrop && (
@@ -638,7 +669,7 @@ function ClipPreview({ clip, videoUrl, onUpdate, onDelete, onCreate, isCreating 
                             削除
                         </button>
                         <button
-                            onClick={() => onCreate(localClip)}
+                            onClick={() => onCreate({ ...localClip, with_danmaku: showDanmaku, danmaku_density: danmakuDensity })}
                             disabled={isCreating}
                             className={`px-3 py-1.5 text-white rounded text-sm font-medium ${isCreating
                                 ? 'bg-green-400 cursor-not-allowed'

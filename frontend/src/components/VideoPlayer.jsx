@@ -1,14 +1,17 @@
 import React, { useRef, useEffect } from 'react';
+import DanmakuLayer from './DanmakuLayer';
 
-export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, defaultStyleName, onTimeUpdate }) {
+export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, defaultStyleName, onTimeUpdate, comments }) {
     const videoRef = useRef(null);
 
     const [activeSubtitles, setActiveSubtitles] = React.useState([]);
     const [scale, setScale] = React.useState(1); // Scale factor relative to 1080p
+    const [currentTime, setCurrentTime] = React.useState(0);
 
     const handleTimeUpdate = () => {
         if (videoRef.current) {
             const time = videoRef.current.currentTime;
+            setCurrentTime(time);
             onTimeUpdate(time);
 
             // Find all active subtitles (filter instead of find)
@@ -158,6 +161,13 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
                 <source src={`${videoUrl}`} type="video/mp4" />
                 お使いのブラウザは動画タグをサポートしていません。
             </video>
+
+            {/* Danmaku Overlay */}
+            <DanmakuLayer
+                comments={comments}
+                currentTime={currentTime}
+                videoHeight={videoRef.current?.clientHeight || videoRef.current?.videoHeight || 1080}
+            />
 
             {/* Custom Subtitle Overlay - Renders ALL active subtitles */}
             {activeSubtitles.map((sub) => {
