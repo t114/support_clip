@@ -4,10 +4,24 @@ const DANMAKU_DURATION = 5.0; // Seconds to cross the screen
 const DANMAKU_LANES = 12; // Number of vertical lanes
 const FONT_SIZE_RATIO = 48 / 1080; // Same ratio as backend (48px at 1080p)
 
-export default function DanmakuLayer({ comments, currentTime, enabled = true, density = 100, videoHeight = 1080 }) {
-    const [offsets, setOffsets] = useState({}); // Tracking extra offsets for smoothness
-    const requestRef = useRef();
-    const lastTimeRef = useRef();
+export default function DanmakuLayer({ comments, currentTime, enabled = true, density = 100, videoHeight = 1080, channelId }) {
+    const [emojiMap, setEmojiMap] = useState({});
+
+    // Fetch emoji map when channelId changes
+    useEffect(() => {
+        if (channelId) {
+            fetch(`/static/emojis/${channelId}/map.json`)
+                .then(res => {
+                    if (res.ok) return res.json();
+                    return {};
+                })
+                .then(data => setEmojiMap(data))
+                .catch(err => {
+                    console.warn('No emoji map found for channel:', channelId);
+                    setEmojiMap({});
+                });
+        }
+    }, [channelId]);
 
     // Filter active comments based on broad range and density
     const activeComments = useMemo(() => {
@@ -18,7 +32,6 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
             if (!isInTime) return false;
 
             // Check density (deterministic sampling)
-            // Use a simple hash of timestamp and text length to keep it consistent
             const hash = Math.floor(c.timestamp * 1000) % 100;
             return hash < (density || 100);
         });
@@ -29,10 +42,35 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
     // Calculate font size based on video height (same ratio as backend)
     const fontSize = Math.round(videoHeight * FONT_SIZE_RATIO);
 
+    // Function to render text with emojis
+    const renderCommentContent = (text) => {
+        if (!Object.keys(emojiMap).length) return text;
+
+        // Split by emoji patterns (e.g. :_mioハトタウロス:)
+        // We use a regex that matches shortcuts in the map
+        const parts = text.split(/(:[A-Za-z0-9_-]+:)/);
+
+        return parts.map((part, i) => {
+            if (part.startsWith(':') && part.endsWith(':') && emojiMap[part]) {
+                const imgName = emojiMap[part];
+                return (
+                    <img
+                        key={i}
+                        src={`/static/emojis/${channelId}/${imgName}`}
+                        alt={part}
+                        className="inline-block align-middle"
+                        style={{ height: `${fontSize * 1.2}px`, margin: '0 2px' }}
+                    />
+                );
+            }
+            return part;
+        });
+    };
+
     return (
         <div
             className="absolute inset-0 pointer-events-none overflow-hidden"
-            style={{ zIndex: 9999 }} // Ensure it's on top of everything
+            style={{ zIndex: 9999 }}
         >
             {activeComments.map((comment) => {
                 const elapsed = currentTime - comment.timestamp;
@@ -48,15 +86,17 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
                         className="absolute whitespace-nowrap text-white font-bold pointer-events-none"
                         style={{
                             top: `${topPercent}%`,
-                            left: `${100 - (progress * 140)}%`, // Move 140% distance
+                            left: `${100 - (progress * 140)}%`,
                             fontSize: `${fontSize}px`,
                             textShadow: '2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0px 0px 4px rgba(0,0,0,0.8)',
                             opacity: 0.9,
-                            transition: 'left 0.1s linear', // Smooth out the jumps between timeupdates
+                            transition: 'left 0.1s linear',
                             willChange: 'left',
+                            display: 'flex',
+                            alignItems: 'center'
                         }}
                     >
-                        {comment.text}
+                        {renderCommentContent(comment.text)}
                     </div>
                 );
             })}

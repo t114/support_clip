@@ -11,6 +11,8 @@ ENV/
 # Backend
 backend/__pycache__/
 backend/uploads/
+backend/assets/emojis/
+backend/yt_data.json
 *.log
 
 # Frontend

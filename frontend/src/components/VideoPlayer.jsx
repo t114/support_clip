@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import DanmakuLayer from './DanmakuLayer';
 
-export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, defaultStyleName, onTimeUpdate, comments }) {
+export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, defaultStyleName, onTimeUpdate, comments, isVertical }) {
     const videoRef = useRef(null);
 
     const [activeSubtitles, setActiveSubtitles] = React.useState([]);
@@ -153,7 +153,7 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
         <div className="relative w-full max-w-4xl mx-auto bg-black rounded-lg overflow-hidden shadow-xl group">
             <video
                 ref={videoRef}
-                className="w-full aspect-video"
+                className={`w-full ${isVertical ? 'aspect-[9/16] max-h-[75vh] object-contain bg-black' : 'aspect-video'}`}
                 controls
                 crossOrigin="anonymous"
                 onTimeUpdate={handleTimeUpdate}

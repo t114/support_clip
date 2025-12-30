@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
 import uuid
+import requests
 from .transcribe import transcribe_video
 from .youtube_downloader import download_youtube_video
 from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality, count_comments_in_clips, detect_kusa_emoji_clips, detect_comment_density_clips
@@ -33,6 +34,11 @@ os.makedirs(PREFIX_IMAGES_DIR, exist_ok=True)
 
 # Mount static files to serve uploaded videos and generated subtitles
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
+
+# Ensure emojis directory exists
+EMOJIS_DIR = "backend/assets/emojis"
+os.makedirs(EMOJIS_DIR, exist_ok=True)
+app.mount("/static/emojis", StaticFiles(directory=EMOJIS_DIR), name="emojis")
 
 import logging
 
@@ -108,7 +114,8 @@ async def upload_video(
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from .video_processing import burn_subtitles_with_ffmpeg
-from .ass_generator import generate_ass
+from .ass_generator import generate_ass, generate_danmaku_ass
+import json
 
 class BurnRequest(BaseModel):
     video_filename: str
@@ -116,6 +123,187 @@ class BurnRequest(BaseModel):
     styles: dict
     saved_styles: Optional[dict] = None
     style_map: Optional[dict] = None
+    with_danmaku: bool = False
+    danmaku_density: int = 10
+
+class SyncEmojiRequest(BaseModel):
+    channel_id: str
+    emojis: Dict[str, str] # shortcut -> url
+
+def extract_text_from_runs(runs):
+    """Helper to extract text and emoji shortcuts from YouTube message runs"""
+    text = ""
+    for run in runs:
+        if 'text' in run:
+            text += run['text']
+        elif 'emoji' in run:
+            emoji = run['emoji']
+            shortcuts = emoji.get('shortcuts', [])
+            if shortcuts:
+                # Use the first shortcut (e.g. :_mioハトタウロス:)
+                text += shortcuts[0]
+            else:
+                # Fallback to image label
+                label = emoji.get('image', {}).get('accessibility', {}).get('accessibilityData', {}).get('label', '')
+                if label:
+                    text += f":{label}:"
+    return text
+
+def extract_comments(base_name):
+    """Refactored helper to extract comments from json files"""
+    live_chat_file = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
+    info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+    
+    comments_data = []
+    
+    logger.info(f"Extracting comments for {base_name}. Checking files...")
+    
+    if os.path.exists(live_chat_file):
+        logger.info(f"Found live chat file: {live_chat_file}")
+        with open(live_chat_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    
+                    # Live chat replay packets often group multiple actions
+                    # Primary structure is replayChatItemAction -> actions -> [addChatItemAction, ...]
+                    actions_container = data.get('replayChatItemAction', {})
+                    actions = actions_container.get('actions', [])
+                    
+                    # Fallback for other structures
+                    if not actions and 'actions' in data:
+                        actions = data.get('actions', [])
+                    
+                    # Global offset for this packet
+                    packet_offset = actions_container.get('videoOffsetTimeMsec')
+                    if not packet_offset and 'videoOffsetTimeMsec' in data:
+                        packet_offset = data['videoOffsetTimeMsec']
+
+                    for action in actions:
+                        item_action = action.get('addChatItemAction', {})
+                        if not item_action: continue
+                        
+                        item = item_action.get('item', {})
+                        if not item: continue
+                        
+                        text = None
+                        if 'liveChatTextMessageRenderer' in item:
+                            renderer = item['liveChatTextMessageRenderer']
+                            text_runs = renderer.get('message', {}).get('runs', [])
+                            text = extract_text_from_runs(text_runs)
+                        elif 'liveChatPaidMessageRenderer' in item:
+                            renderer = item['liveChatPaidMessageRenderer']
+                            text_runs = renderer.get('message', {}).get('runs', [])
+                            text = extract_text_from_runs(text_runs)
+                            purchase_amount = renderer.get('purchaseAmountText', {}).get('simpleText', '')
+                            if purchase_amount:
+                                text = f"[{purchase_amount}] {text}"
+                        elif 'liveChatMembershipItemRenderer' in item:
+                            renderer = item['liveChatMembershipItemRenderer']
+                            header_runs = renderer.get('headerSubtext', {}).get('runs', [])
+                            header_text = extract_text_from_runs(header_runs)
+                            msg_runs = renderer.get('message', {}).get('runs', [])
+                            msg_text = extract_text_from_runs(msg_runs)
+                            text = f"{header_text} {msg_text}".strip()
+                        elif 'liveChatSponsorshipGiftRedemptionAnnouncementRenderer' in item:
+                            renderer = item['liveChatSponsorshipGiftRedemptionAnnouncementRenderer']
+                            msg_runs = renderer.get('message', {}).get('runs', [])
+                            text = extract_text_from_runs(msg_runs)
+                            
+                        if text:
+                            # Use packet offset as default, override if renderer has its own (unlikely but possible)
+                            offset_str = packet_offset
+                            if 'videoOffsetTimeMsec' in item.get('liveChatTextMessageRenderer', {}):
+                                offset_str = item['liveChatTextMessageRenderer']['videoOffsetTimeMsec']
+                            
+                            if offset_str:
+                                try:
+                                    time_sec = int(offset_str) / 1000.0
+                                    comments_data.append({'text': text, 'timestamp': time_sec})
+                                except:
+                                    pass
+                except:
+                    continue
+                    
+    if not comments_data and os.path.exists(info_file):
+        logger.info(f"Checking info file for comments: {info_file}")
+        try:
+            with open(info_file, 'r', encoding='utf-8') as f:
+                info = json.load(f)
+                if 'comments' in info:
+                    logger.info(f"Found {len(info['comments'])} comments in info.json")
+                    for c in info['comments']:
+                        text = c.get('text', '')
+                        timestamp = c.get('timestamp')
+                        if timestamp is not None:
+                            comments_data.append({'text': text, 'timestamp': float(timestamp)})
+        except Exception as e:
+            logger.error(f"Error reading info.json comments: {e}")
+            
+    logger.info(f"Extracted {len(comments_data)} comments total.")
+    return comments_data
+
+@app.get("/youtube/comments/{video_filename}")
+async def get_video_comments(video_filename: str):
+    """Get comments for a video for frontend preview"""
+    base_name = os.path.splitext(video_filename)[0]
+    comments = extract_comments(base_name)
+    return {"comments": comments}
+
+@app.post("/youtube/sync-emojis")
+async def sync_emojis(request: SyncEmojiRequest):
+    """Download and sync membership emojis for a channel"""
+    try:
+        channel_id = request.channel_id
+        if not channel_id or channel_id == "UNKNOWN_CHANNEL":
+             raise HTTPException(status_code=400, detail="Channel ID is required")
+             
+        channel_dir = os.path.join(EMOJIS_DIR, channel_id)
+        os.makedirs(channel_dir, exist_ok=True)
+        
+        saved_count = 0
+        for shortcut, url in request.emojis.items():
+            # Sanitize shortcut to use as filename
+            safe_name = "".join([c for c in shortcut if c.isalnum() or c in "_-"]).strip("_")
+            if not safe_name: safe_name = f"emoji_{hash(shortcut)}"
+            
+            # Identify extension from URL if possible, otherwise .png
+            ext = ".png"
+            if ".webp" in url: ext = ".webp"
+            elif ".gif" in url: ext = ".gif"
+            
+            file_path = os.path.join(channel_dir, f"{safe_name}{ext}")
+            
+            # Download if not exists
+            if not os.path.exists(file_path):
+                logger.info(f"Downloading emoji {shortcut} for {channel_id}")
+                resp = requests.get(url, stream=True)
+                if resp.status_code == 200:
+                    with open(file_path, 'wb') as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                    saved_count += 1
+            else:
+                saved_count += 1
+                
+        # Also save a mapping file for the frontend to know which extension to use
+        mapping_file = os.path.join(channel_dir, "map.json")
+        with open(mapping_file, 'w', encoding='utf-8') as f:
+            # We store the local filename (basename) for each shortcut
+            local_mapping = {}
+            for shortcut, url in request.emojis.items():
+                 safe_name = "".join([c for c in shortcut if c.isalnum() or c in "_-"]).strip("_")
+                 if not safe_name: safe_name = f"emoji_{hash(shortcut)}"
+                 ext = ".png"
+                 if ".webp" in url: ext = ".webp"
+                 elif ".gif" in url: ext = ".gif"
+                 local_mapping[shortcut] = f"{safe_name}{ext}"
+            json.dump(local_mapping, f, ensure_ascii=False, indent=2)
+
+        return {"status": "success", "saved_count": saved_count, "channel_id": channel_id}
+    except Exception as e:
+        logger.error(f"Error syncing emojis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/burn")
 async def burn_subtitles(request: BurnRequest):
@@ -154,8 +342,34 @@ async def burn_subtitles(request: BurnRequest):
             saved_styles=cleaned_saved_styles,
             style_map=request.style_map
         )
+        
+        # Generate Danmaku ASS if requested
+        danmaku_ass_path = None
+        if request.with_danmaku:
+            comments_data = extract_comments(base_name)
 
-        # Burn subtitles (now with image prefix support)
+            if comments_data:
+                # Apply density filtering
+                density = getattr(request, 'danmaku_density', 100)
+                if density < 100:
+                    comments_data = [c for c in comments_data if (int(c['timestamp'] * 1000) % 100) < density]
+
+                danmaku_ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_danmaku.ass")
+                
+                # We need video resolution for danmaku generation.
+                from .video_processing import get_video_info
+                v_info = get_video_info(video_path)
+                w = v_info.get('width', 1920) or 1920
+                h = v_info.get('height', 1080) or 1080
+                
+                generate_danmaku_ass(
+                    comments_data,
+                    danmaku_ass_path,
+                    resolution_x=w,
+                    resolution_y=h
+                )
+
+        # Burn subtitles (now with image prefix support and danmaku)
         output_filename = f"{base_name}_burned.mp4"
         output_path = os.path.join(UPLOAD_DIR, output_filename)
 
@@ -167,7 +381,8 @@ async def burn_subtitles(request: BurnRequest):
             saved_styles=cleaned_saved_styles,
             style_map=request.style_map,
             default_style=cleaned_styles,
-            upload_dir=UPLOAD_DIR
+            upload_dir=UPLOAD_DIR,
+            danmaku_ass_path=danmaku_ass_path
         )
 
         return {"filename": output_filename}
@@ -338,7 +553,7 @@ def download_youtube(request: YouTubeDownloadRequest):
             "video_info": video_info,
             "start_time": video_info.get("start_time", 0),
             "cached": is_cached,
-            "has_comments": video_info.get("comments_file") is not None
+            "has_comments": video_info.get("comments_file") is not None or os.path.exists(os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")) or os.path.exists(os.path.join(UPLOAD_DIR, f"{base_name}.info.json"))
         }
 
         logger.info(f"[YOUTUBE_DOWNLOAD] Returning response for {video_id}: {response_data.keys()}")
@@ -773,6 +988,9 @@ class ClipRequest(BaseModel):
     crop_y: Optional[float] = None
     crop_width: Optional[float] = None
     crop_height: Optional[float] = None
+    with_danmaku: bool = False
+    danmaku_density: int = 10
+    aspect_ratio: Optional[str] = None
 
 @app.post("/youtube/create-clip")
 async def create_clip(request: ClipRequest):
@@ -795,7 +1013,41 @@ async def create_clip(request: ClipRequest):
                 'height': request.crop_height
             }
 
-        extract_clip(video_path, request.start, request.end, output_path, crop_params=crop_params)
+        danmaku_ass_path = None
+        if request.with_danmaku:
+            # Extract and filter comments for this clip range
+            all_comments = extract_comments(base_name)
+            # Filter comments that fall within the clip range
+            # Note: A comment starting at t might need to be shown even if it started slightly before start?
+            # Actually, if we show it for 5s, we should include those that overlap.
+            # But let's start simple: comments that *start* within [start, end].
+            clip_comments = []
+            density = request.danmaku_density
+            for c in all_comments:
+                if request.start <= c['timestamp'] <= request.end:
+                    # Apply density filtering (deterministic)
+                    if (int(c['timestamp'] * 1000) % 100) < density:
+                        # Adjust timestamp to be relative to clip start
+                        clip_comments.append({
+                            'text': c['text'],
+                            'timestamp': c['timestamp'] - request.start
+                        })
+            
+            if clip_comments:
+                danmaku_ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_clip_{safe_title}_danmaku.ass")
+                from .video_processing import get_video_info
+                v_info = get_video_info(video_path)
+                w = v_info.get('width', 1920) or 1920
+                h = v_info.get('height', 1080) or 1080
+                
+                generate_danmaku_ass(
+                    clip_comments,
+                    danmaku_ass_path,
+                    resolution_x=w,
+                    resolution_y=h
+                )
+
+        extract_clip(video_path, request.start, request.end, output_path, crop_params=crop_params, danmaku_ass_path=danmaku_ass_path, aspect_ratio=request.aspect_ratio)
 
         return {
             "video_url": f"/static/{output_filename}",

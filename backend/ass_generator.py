@@ -261,3 +261,152 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         f.write("\n".join(ass_lines))
         
     return output_path
+import random
+
+def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=1080, font_size=48, speed_min=8, speed_max=12):
+    """
+    Generate an ASS file for scrolling comments (Niconico style / Danmaku).
+    
+    Args:
+        comments (list): List of dicts with 'text', 'timestamp' (seconds).
+        output_path (str): Path to save the ASS file.
+        resolution_x (int): Video width.
+        resolution_y (int): Video height.
+        font_size (int): Font size for comments.
+        speed_min (int): Minimum duration for a comment to cross the screen.
+        speed_max (int): Maximum duration for a comment to cross the screen.
+    """
+    
+    ass_lines = []
+    
+    # Header
+    ass_lines.append("[Script Info]")
+    ass_lines.append("ScriptType: v4.00+")
+    ass_lines.append("WrapStyle: 2") # No wrapping, wider than screen valid
+    ass_lines.append(f"PlayResX: {resolution_x}")
+    ass_lines.append(f"PlayResY: {resolution_y}")
+    ass_lines.append("")
+    
+    # Styles
+    ass_lines.append("[V4+ Styles]")
+    ass_lines.append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding")
+    
+    # Danmaku Style
+    # Check if a custom font is preferred, otherwise use a standard sans-serif
+    font_name = "Noto Sans CJK JP"
+    
+    # Primary color white, Outline black
+    # &H00FFFFFF (White), &H00000000 (Black)
+    # Alignment 4 (Middle Left) - actually for move usually we want custom positioning
+    # But for \move, alignment determines the anchor point. 
+    # Use 7 (Top Left) or 4 (Center Left) or even 8 (Top Center).
+    # Let's use 4 (Center Left) so y-coordinate is the center of the text line.
+    ass_lines.append(f"Style: Danmaku,{font_name},{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,4,0,0,0,1")
+    ass_lines.append("")
+    
+    # Events
+    ass_lines.append("[Events]")
+    ass_lines.append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
+    
+    # Manage lanes to avoid overlapping
+    # Divide screen height into lanes
+    margin_top = 50
+    margin_bottom = 100 # Leave space for subtitles
+    usable_height = resolution_y - margin_top - margin_bottom
+    lane_height = int(font_size * 1.2)
+    num_lanes = usable_height // lane_height
+    
+    # Track when each lane becomes available (end time of previous comment in that lane + buffer)
+    # Actually, for scrolling text, we need to ensure the *following* comment doesn't catch up to the *previous* one
+    # AND the *previous* one has cleared the entrance point before the *following* one starts.
+    # Simplified Logic: Just random lane or Round Robin.
+    # Better Logic: Track the 'clear time' of the right edge of the screen for each lane.
+    
+    lane_available_times = [0.0] * num_lanes
+    
+    sorted_comments = sorted(comments, key=lambda x: x.get('timestamp', 0))
+    
+    for comment in sorted_comments:
+        text = comment.get('text', '')
+        if not text:
+            continue
+            
+        start_time = comment.get('timestamp', 0)
+        
+        # Calculate duration based on text length to keep speed somewhat consistent?
+        # Or just random duration for variety. Niconico is usually fixed duration (e.g. 4s) regardless of length?
+        # Actuall usually 3-5 seconds.
+        # Let's use random duration for variety.
+        duration = random.uniform(speed_min, speed_max)
+        end_time = start_time + duration
+        
+        # Find a suitable lane
+        # A lane is available if the last comment in that lane has moved far enough to not overlap.
+        # Since we don't calculate text width accurately in python without font metrics,
+        # we'll use a simple heuristic or just checking start time > last available timestamp.
+        # But `lane_available_times` stores when the lane is free for a NEW text to appear at right edge.
+        # For simplicity, let's just use simple time tracking:
+        # If start_time >= lane_available_time, we can use it.
+        # We try to pick the lane with the smallest available time that is <= start_time.
+        
+        chosen_lane = -1
+        
+        # Shuffle lanes to check to avoid filling top lanes first always if multiple are free
+        lane_indices = list(range(num_lanes))
+        random.shuffle(lane_indices)
+        
+        for lane_idx in lane_indices:
+            if start_time >= lane_available_times[lane_idx]:
+                chosen_lane = lane_idx
+                break
+        
+        # If no lane is completely free, just pick the one that becomes free soonest (overlap might happen but minimizes it)
+        # OR just pick random to simulate chaos (danmaku)
+        if chosen_lane == -1:
+             chosen_lane = min(range(num_lanes), key=lambda i: lane_available_times[i])
+        
+        # Update available time for this lane
+        # We need to estimate when the text clears the right edge enough for next text.
+        # Heuristic: 20% of duration buffer?
+        # Or simply: start_time + (duration * 0.2)
+        lane_available_times[chosen_lane] = start_time + (duration * 0.3) 
+        
+        y_pos = margin_top + (chosen_lane * lane_height) + (lane_height // 2)
+        
+        # \move(x1, y1, x2, y2)
+        # x1: Right edge + text_width/2 ? 
+        # ASS \move origin depends on alignment. Alignment 4 (Center Left) means (x,y) is the left center of the text.
+        # Start: Left side of text at Screen Width + Padding.
+        # End: Right side of text at 0 - Padding -> Left side of text at 0 - Text Width - Padding.
+        
+        # Since we don't know text width, we can use a large enough range.
+        # Standard trick: Start at X=Resolution+Buffer, End at X=-Resolution/2 (approximation)
+        # Or better: Niconico style usually moves from right to left.
+        # If alignment is bottom-center (2), x is center of text.
+        # Start x: Resolution + Width/2 ??? No.
+        
+        # Let's trust libass simple move.
+        # Start X: resolution_x + 100 (Just off screen right)
+        # End X: -100 (Just off screen left? Text width complicates this).
+        # Longer text needs more negative end point.
+        # Let's guess text width chars * font_size.
+        estimated_width = len(text) * font_size
+        start_x = resolution_x + 50
+        end_x = -(estimated_width + 50)
+        
+        # Convert to ASS time format
+        ass_start = seconds_to_ass_time(start_time)
+        ass_end = seconds_to_ass_time(end_time)
+        
+        # Format: \move(x1, y1, x2, y2)
+        # y1 and y2 are same (y_pos)
+        move_tag = f"\\move({start_x},{y_pos},{end_x},{y_pos})"
+        
+        # Color variety? (Optional: white default, sometimes others)
+        
+        ass_lines.append(f"Dialogue: 0,{ass_start},{ass_end},Danmaku,,0,0,0,,{{{move_tag}}}{text}")
+        
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write("\n".join(ass_lines))
+        
+    return output_path

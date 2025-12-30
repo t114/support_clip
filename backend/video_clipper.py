@@ -1,10 +1,12 @@
 import subprocess
 import os
 
-def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None):
+def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None):
     """
     Extracts a clip from the video using ffmpeg.
     crop_params: dict with keys 'x', 'y', 'width', 'height' (optional)
+    danmaku_ass_path: path to ASS file for danmaku comments (optional)
+    aspect_ratio: '9:16' for vertical letterbox (optional)
     """
     try:
         # Ensure absolute paths
@@ -22,6 +24,15 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
             h = int(crop_params.get('height', 0))
             if w > 0 and h > 0:
                 filters.append(f"crop={w}:{h}:{x}:{y}")
+
+        if aspect_ratio == '9:16':
+            # Letterbox to 9:16 (720x1280)
+            filters.append("scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2")
+
+        if danmaku_ass_path:
+            # Escape path for ffmpeg filter
+            escaped_ass_path = danmaku_ass_path.replace("\\", "/").replace(":", "\\:").replace("'", "'\\\\\\''")
+            filters.append(f"subtitles='{escaped_ass_path}':fontsdir=/usr/share/fonts/")
                 
         cmd = [
             "ffmpeg",

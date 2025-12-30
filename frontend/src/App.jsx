@@ -16,6 +16,7 @@ function App() {
   // Subtitle State
   const [subtitles, setSubtitles] = useState([]);
   const [currentTime, setCurrentTime] = useState(0);
+  const [playerAspectRatio, setPlayerAspectRatio] = useState('16:9');
 
   // Style State
   const [styles, setStyles] = useState({
@@ -304,6 +305,17 @@ function App() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Left Column: Video and Style Editor */}
                 <div className="lg:col-span-2 space-y-6">
+                  <div className="flex justify-end mb-2">
+                    <button
+                      onClick={() => setPlayerAspectRatio(playerAspectRatio === '16:9' ? '9:16' : '16:9')}
+                      className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded flex items-center gap-1"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                      </svg>
+                      プレイヤー比率: {playerAspectRatio}
+                    </button>
+                  </div>
                   <VideoPlayer
                     videoUrl={videoData.video_url}
                     subtitles={subtitles}
@@ -311,6 +323,7 @@ function App() {
                     savedStyles={savedStyles}
                     defaultStyleName={defaultStyleName}
                     onTimeUpdate={setCurrentTime}
+                    isVertical={playerAspectRatio === '9:16'}
                   />
 
                   <StyleEditor

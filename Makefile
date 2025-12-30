@@ -21,9 +21,26 @@ start:
 	@echo "Server started. Run 'make logs' to view output."
 
 stop:
-	@lsof -t -i:8000 | xargs -r kill -9
+	@echo "Stopping backend server..."
+	@if [ -f $(PID_FILE) ]; then \
+		kill $$(cat $(PID_FILE)) 2>/dev/null || true; \
+	fi
+	@-lsof -t -i:8000 | xargs -r kill -9 2>/dev/null || true
+	@-pkill -f "uvicorn backend.main:app" 2>/dev/null || true
+	@$(MAKE) -s kill-ffmpeg
 	@rm -f $(PID_FILE)
+	@echo "Waiting for port 8000 to be released..."
+	@for i in 1 2 3 4 5; do \
+		if ! lsof -i:8000 > /dev/null; then \
+			break; \
+		fi; \
+		sleep 1; \
+	done
 	@echo "Server stopped."
+
+kill-ffmpeg:
+	@echo "Killing lingering ffmpeg processes..."
+	@pkill -9 ffmpeg || echo "No ffmpeg processes found."
 
 restart: stop start
 

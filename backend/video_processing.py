@@ -133,9 +133,10 @@ def download_image_if_needed(image_url, upload_dir):
         # Assume it's already a local path
         return image_url
 
-def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None, saved_styles=None, style_map=None, default_style=None, upload_dir="backend/uploads"):
+def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None, saved_styles=None, style_map=None, default_style=None, upload_dir="backend/uploads", danmaku_ass_path=None):
     """
     Burn subtitles and prefix images into video using ffmpeg.
+    Optional: burn Niconico-style danmaku comments.
     """
 
     # Extract prefix images info
@@ -145,108 +146,88 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
 
     # Escape path for ffmpeg
     escaped_ass_path = ass_path.replace(":", "\\:").replace("'", "\\'")
+    escaped_danmaku_ass_path = danmaku_ass_path.replace(":", "\\:").replace("'", "\\'") if danmaku_ass_path else None
 
-    if not image_overlays:
-        # Simple case: no images, just burn ASS subtitles
+    # Common subtitle filter string
+    sub_filter = f"subtitles='{escaped_ass_path}':fontsdir=/usr/share/fonts/"
+    danmaku_filter = f"subtitles='{escaped_danmaku_ass_path}':fontsdir=/usr/share/fonts/" if danmaku_ass_path else None
+
+    if not image_overlays and not danmaku_ass_path:
+        # Simple case: no images or danmaku, just burn ASS subtitles
         cmd = [
             "ffmpeg",
             "-y",
             "-i", video_path,
-            "-vf", f"subtitles='{escaped_ass_path}':fontsdir=/usr/share/fonts/",
+            "-vf", sub_filter,
             "-c:a", "copy",
             output_path
         ]
     else:
-        # Complex case: burn ASS subtitles + overlay images
+        # Complex case: burn ASS subtitles + overlay images + danmaku
         # Build filter_complex
-
-        # Get video info for positioning
-        video_info = get_video_info(video_path)
+        
+        # Determine filter chain order:
+        # Typically: Background video -> Danmaku -> Subtitles -> Images -> Output
+        # Or: Background -> Subtitles -> Images -> Danmaku
+        # Danmaku usually flows BEHIND main subtitles if possible, but definitely ON TOP of video.
+        # Let's do: Video -> [Danmaku] -> [Subtitles] -> [Images] -> Output
 
         # Start with base video
         input_files = ["-i", video_path]
-
+        
         # Add image inputs
         for i, overlay in enumerate(image_overlays):
             # Download/get local path
             local_image_path = download_image_if_needed(overlay['image_url'], upload_dir)
             input_files.extend(["-i", local_image_path])
 
-        # Build filter_complex
-        # Strategy: burn ASS subtitles first, THEN overlay images on top
-        # This ensures images appear above the subtitle text
-
-        # Step 1: Burn ASS subtitles first
         filter_parts = []
-        filter_parts.append(f"[0:v]subtitles='{escaped_ass_path}':fontsdir=/usr/share/fonts/[subt]")
+        current_label = "[0:v]"
+        
+        # 1. Apply Danmaku if exists
+        if danmaku_filter:
+            filter_parts.append(f"{current_label}{danmaku_filter}[danmaku]")
+            current_label = "[danmaku]"
 
+        # 2. Apply Main Subtitles
+        filter_parts.append(f"{current_label}{sub_filter}[subt]")
         current_label = "[subt]"
 
-        # Step 2: Overlay images on top of subtitles
+        # 3. Overlay images on top of subtitles
         for i, overlay in enumerate(image_overlays):
             image_index = i + 1  # Input 0 is video, images start at 1
 
-            # Calculate position to match subtitle text position
-            # bottom_percent: distance from bottom (0-100)
-            # Convert to y position: H - (H * bottom_percent / 100) - image_height
+            # Calculate position (same as before)
             size = overlay['size']
-
-            # ASS subtitles use MarginV which is calculated as: bottom * 7 (approx)
-            # We need to align the image with the subtitle text position
             margin_v = overlay['bottom_percent'] * 7
-
-            # Calculate Y position to match ASS subtitle position
-            # ASS uses MarginV from bottom, so we do: H - MarginV - image_size
             y_pos = f"H-{margin_v}-{size}"
-
-            # Alignment: left, center, right
-            # Place image BEFORE subtitle text to avoid overlap
-            # ASS margins must match ass_generator.py settings
+            
             alignment = overlay['alignment']
-
-            # ASS margin in PlayResX coordinates (1920)
-            # Must match the values in ass_generator.py
             if alignment in ['left', 'top-left']:
-                ass_margin_l = 150  # Left/top-left alignment uses 150px (~8%)
+                ass_margin_l = 150
                 ass_margin_r = 96
             elif alignment in ['right', 'top-right']:
                 ass_margin_l = 96
-                ass_margin_r = 150  # Right/top-right alignment uses 150px (~8%)
-            else:  # center, top
+                ass_margin_r = 150
+            else:
                 ass_margin_l = 96
                 ass_margin_r = 96
-
-            # Convert ASS margins to video coordinates
-            # margin_ratio = ass_margin / 1920
+                
             margin_l_ratio = ass_margin_l / 1920.0
             margin_r_ratio = ass_margin_r / 1920.0
-
-            # Spacing between image and text
-            spacing_px = 10  # 10px gap
-
+            spacing_px = 10
+            
             if alignment == 'left' or alignment == 'top-left':
-                # Place image to the LEFT of subtitle text
-                # Image right edge = MarginL - spacing
-                # Image left edge (x position) = MarginL - image_size - spacing
                 x_pos = f"W*{margin_l_ratio}-{size}-{spacing_px}"
             elif alignment == 'right' or alignment == 'top-right':
-                # Place image to the LEFT of right-aligned text
-                # This is complex, so just place it at a safe distance from right edge
                 x_pos = f"W*(1-{margin_r_ratio})-{size}-{spacing_px}"
-            else:  # center, top
-                # Place image to the left of center text
-                # Center point is W/2, place image before it
+            else:
                 x_pos = f"(W/2)-{size}-{spacing_px}"
 
-            # Top alignments
             if alignment.startswith('top'):
-                # For top alignment, calculate from top instead
-                y_pos = f"{margin_v}+20"  # Add some padding from top
+                y_pos = f"{margin_v}+20"
 
-            # Scale image and overlay
-            # enable expression: between(t, start, end)
             next_label = f"[v{i+1}]"
-
             filter_parts.append(
                 f"[{image_index}:v]scale={size}:{size}[img{i}]; "
                 f"{current_label}[img{i}]overlay=x={x_pos}:y={y_pos}:enable='between(t,{overlay['start']},{overlay['end']})'{next_label}"
@@ -254,14 +235,23 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
             current_label = next_label
 
         # Final output label
-        # Rename the last label to [out]
         if image_overlays:
-            # Replace the last label with [out]
             last_filter = filter_parts[-1]
             filter_parts[-1] = last_filter.replace(f'[v{len(image_overlays)}]', '[out]')
         else:
-            # No images, just rename subtitle output
-            filter_parts[0] = filter_parts[0].replace('[subt]', '[out]')
+            # If no images, the last filter output is [subt] (or [danmaku] if no subt?? No, subt acts as passthrough if no events?)
+            # Actually, standard subtitles always run.
+            
+            # If we had images loop, last_label was updated.
+            # If we didn't enter image loop, current_label is [subt].
+            # Just map current_label to [out] via a null filter or just reuse the name?
+            # Easier to rename the last output.
+            
+            # Rewrite last filter to output [out]
+            last_filter = filter_parts[-1]
+            # Replace the output label of the last filter
+            if "[subt]" in last_filter:
+                filter_parts[-1] = last_filter.replace("[subt]", "[out]")
 
         filter_complex = ";".join(filter_parts)
 

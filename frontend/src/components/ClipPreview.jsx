@@ -18,7 +18,8 @@ function ClipPreview({
     onCreate,
     isCreating,
     comments,
-    danmakuDensity = 100
+    danmakuDensity = 10,
+    channelId
 }) {
     const videoRef = useRef(null);
     const containerRef = useRef(null);
@@ -174,6 +175,10 @@ function ClipPreview({
         }
 
         const targetAspect = mode === 'horizontal' ? 16 / 9 : 9 / 16;
+        if (mode === 'letterbox') {
+            setCropRect(null);
+            return;
+        }
 
         // Start with a reasonable size (e.g., 80% width or height)
         let w, h;
@@ -204,13 +209,32 @@ function ClipPreview({
 
     const handleCropModeChange = (mode) => {
         setCropMode(mode);
-        initCropRect(mode);
+        if (mode === 'letterbox') {
+            const updated = {
+                ...localClip,
+                aspect_ratio: '9:16'
+            };
+            delete updated.crop_x;
+            delete updated.crop_y;
+            delete updated.crop_width;
+            delete updated.crop_height;
+            setLocalClip(updated);
+            onUpdate(updated);
+            setCropRect(null);
+        } else {
+            // Clear aspect_ratio when switching back to crop
+            const updated = { ...localClip };
+            delete updated.aspect_ratio;
+            setLocalClip(updated);
+            initCropRect(mode);
+        }
     };
 
     // Drag and Resize Implementation
     const [resizeHandle, setResizeHandle] = useState(null); // 'nw', 'ne', 'sw', 'se' or null
 
     const updateClipCrop = (rect) => {
+        if (cropMode === 'letterbox') return;
         const dims = getSafeVideoDims();
         if (!dims.width || dims.width <= 16) return;
 
@@ -392,11 +416,12 @@ function ClipPreview({
                         enabled={showDanmaku}
                         density={danmakuDensity}
                         videoHeight={videoRef.current?.clientHeight || videoDims.height || 1080}
+                        channelId={channelId}
                     />
 
                     {/* Crop Overlay */}
                     {
-                        showCrop && cropRect && (
+                        showCrop && cropMode !== 'letterbox' && cropRect && (
                             <div
                                 className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"
                                 style={{
@@ -517,6 +542,15 @@ function ClipPreview({
                                             }`}
                                     >
                                         縦 (9:16)
+                                    </button>
+                                    <button
+                                        onClick={() => handleCropModeChange('letterbox')}
+                                        className={`flex-1 py-1 px-2 text-sm rounded border ${cropMode === 'letterbox'
+                                            ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                            : 'bg-white border-gray-300 text-gray-600'
+                                            }`}
+                                    >
+                                        黒枠 (9:16)
                                     </button>
                                 </div>
                                 <div className="text-xs text-gray-500 text-center">

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ClipPreview from './ClipPreview';
 import DescriptionModal from './DescriptionModal';
 import TwitterModal from './TwitterModal';
+import EmojiSyncModal from './EmojiSyncModal';
 
 function YouTubeClipCreator() {
     const [url, setUrl] = useState('');
@@ -22,7 +23,7 @@ function YouTubeClipCreator() {
     const [creatingClipId, setCreatingClipId] = useState(null);
     const [startTime, setStartTime] = useState(0);
     const [withComments, setWithComments] = useState(false);
-    const [danmakuDensity, setDanmakuDensity] = useState(100); // 0 to 100%
+    const [danmakuDensity, setDanmakuDensity] = useState(10); // 0 to 100%
 
     // Description modal state
     const [isDescriptionModalOpen, setIsDescriptionModalOpen] = useState(false);
@@ -36,6 +37,7 @@ function YouTubeClipCreator() {
 
     // Comments for Danmaku Preview
     const [comments, setComments] = useState([]);
+    const [isEmojiModalOpen, setIsEmojiModalOpen] = useState(false);
 
     // Load comments when videoInfo is available and has comments
     useEffect(() => {
@@ -485,7 +487,8 @@ function YouTubeClipCreator() {
                     crop_width: clip.crop_width,
                     crop_height: clip.crop_height,
                     with_danmaku: clip.with_danmaku,
-                    danmaku_density: clip.danmaku_density
+                    danmaku_density: clip.danmaku_density,
+                    aspect_ratio: clip.aspect_ratio
                 })
             });
 
@@ -648,9 +651,20 @@ function YouTubeClipCreator() {
                         <div className="flex items-center gap-2 mt-1">
                             <p className="text-sm text-gray-600">長さ: {videoInfo.duration}秒</p>
                             {((videoInfo.has_comments || withComments)) && (
-                                <span className={`text-xs px-2 py-0.5 rounded-full ${comments.length > 0 ? 'bg-green-100 text-green-700' : (videoInfo.has_comments ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}`}>
-                                    コメント: {videoInfo.has_comments ? (comments.length > 0 ? `${comments.length}件 ✓` : '読み込み中...') : 'データなし ✗'}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${comments.length > 0 ? 'bg-green-100 text-green-700' : (videoInfo.has_comments ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}`}>
+                                        コメント: {videoInfo.has_comments ? (comments.length > 0 ? `${comments.length}件 ✓` : '読み込み中...') : 'データなし ✗'}
+                                    </span>
+                                    {videoInfo.has_comments && (
+                                        <button
+                                            onClick={() => setIsEmojiModalOpen(true)}
+                                            className="text-[10px] bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors flex items-center gap-1 font-bold"
+                                            title="メンバースタンプを同期"
+                                        >
+                                            スタンプ同期
+                                        </button>
+                                    )}
+                                </div>
                             )}
                         </div>
                         {totalSegments > 0 && (
@@ -897,6 +911,7 @@ function YouTubeClipCreator() {
                                     isCreating={creatingClipId === clip.id}
                                     comments={comments}
                                     danmakuDensity={danmakuDensity}
+                                    channelId={videoInfo?.channel_id}
                                 />
                             ))}
                         </div>
@@ -921,6 +936,15 @@ function YouTubeClipCreator() {
                 isOpen={isTwitterModalOpen}
                 onClose={() => setIsTwitterModalOpen(false)}
                 initialText={twitterPrText}
+            />
+
+            <EmojiSyncModal
+                isOpen={isEmojiModalOpen}
+                onClose={() => setIsEmojiModalOpen(false)}
+                channelId={videoInfo?.channel_id}
+                onSyncComplete={(channelId) => {
+                    // Force refresh of emoji map if necessary
+                }}
             />
         </div>
     );
