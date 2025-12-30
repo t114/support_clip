@@ -32,13 +32,13 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 PREFIX_IMAGES_DIR = os.path.join(UPLOAD_DIR, "prefix_images")
 os.makedirs(PREFIX_IMAGES_DIR, exist_ok=True)
 
-# Mount static files to serve uploaded videos and generated subtitles
-app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
-
 # Ensure emojis directory exists
 EMOJIS_DIR = "backend/assets/emojis"
 os.makedirs(EMOJIS_DIR, exist_ok=True)
 app.mount("/static/emojis", StaticFiles(directory=EMOJIS_DIR), name="emojis")
+
+# Mount static files to serve uploaded videos and generated subtitles
+app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
 
 import logging
 
