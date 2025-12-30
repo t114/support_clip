@@ -133,16 +133,16 @@ def download_image_if_needed(image_url, upload_dir):
         # Assume it's already a local path
         return image_url
 
-def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None, saved_styles=None, style_map=None, default_style=None, upload_dir="backend/uploads", danmaku_ass_path=None):
+def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None, saved_styles=None, style_map=None, default_style=None, upload_dir="backend/uploads", danmaku_ass_path=None, emoji_overlays=None):
     """
     Burn subtitles and prefix images into video using ffmpeg.
-    Optional: burn Niconico-style danmaku comments.
+    Optional: burn Niconico-style danmaku comments with membership emojis.
     """
 
-    # Extract prefix images info
-    image_overlays = []
+    # Extract prefix images info (per-cue icons)
+    prefix_overlays = []
     if vtt_path:
-        image_overlays = extract_prefix_images_from_vtt(vtt_path, saved_styles, style_map, default_style)
+        prefix_overlays = extract_prefix_images_from_vtt(vtt_path, saved_styles, style_map, default_style)
 
     # Escape path for ffmpeg
     escaped_ass_path = ass_path.replace(":", "\\:").replace("'", "\\'")
@@ -152,122 +152,101 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
     sub_filter = f"subtitles='{escaped_ass_path}':fontsdir=/usr/share/fonts/"
     danmaku_filter = f"subtitles='{escaped_danmaku_ass_path}':fontsdir=/usr/share/fonts/" if danmaku_ass_path else None
 
-    if not image_overlays and not danmaku_ass_path:
-        # Simple case: no images or danmaku, just burn ASS subtitles
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i", video_path,
-            "-vf", sub_filter,
-            "-c:a", "copy",
-            output_path
-        ]
-    else:
-        # Complex case: burn ASS subtitles + overlay images + danmaku
-        # Build filter_complex
+    # Start with base video
+    input_files = ["-i", video_path]
+    current_label = "[0:v]"
+    filter_parts = []
+
+    # Handle Prefix Images (Per-cue icons)
+    # These are downloaded and added as inputs
+    prefix_img_paths = [download_image_if_needed(o['image_url'], upload_dir) for o in prefix_overlays]
+    for p in prefix_img_paths:
+        input_files.extend(["-i", p])
+
+    # Handle Membership Emojis
+    # These are local files, already synced
+    unique_emoji_paths = []
+    if emoji_overlays:
+        for overlay in emoji_overlays:
+            if overlay['path'] not in unique_emoji_paths:
+                unique_emoji_paths.append(overlay['path'])
+    
+    for p in unique_emoji_paths:
+        input_files.extend(["-i", os.path.abspath(p)])
+
+    # 1. Apply Danmaku if exists
+    if danmaku_filter:
+        filter_parts.append(f"{current_label}{danmaku_filter}[danmaku]")
+        current_label = "[danmaku]"
+
+    # 2. Apply Main Subtitles
+    filter_parts.append(f"{current_label}{sub_filter}[subt]")
+    current_label = "[subt]"
+
+    # 3. Overlay Prefix Images
+    prefix_start_idx = 1 # Input 0 is video
+    for i, overlay in enumerate(prefix_overlays):
+        img_idx = prefix_start_idx + i
+        size = overlay['size']
+        margin_v = overlay['bottom_percent'] * 7
+        y_pos = f"H-{margin_v}-{size}"
         
-        # Determine filter chain order:
-        # Typically: Background video -> Danmaku -> Subtitles -> Images -> Output
-        # Or: Background -> Subtitles -> Images -> Danmaku
-        # Danmaku usually flows BEHIND main subtitles if possible, but definitely ON TOP of video.
-        # Let's do: Video -> [Danmaku] -> [Subtitles] -> [Images] -> Output
-
-        # Start with base video
-        input_files = ["-i", video_path]
+        alignment = overlay['alignment']
+        ass_margin_l = 150 if alignment in ['left', 'top-left'] else 96
+        ass_margin_r = 150 if alignment in ['right', 'top-right'] else 96
+        margin_l_ratio = ass_margin_l / 1920.0
+        margin_r_ratio = ass_margin_r / 1920.0
+        spacing_px = 10
         
-        # Add image inputs
-        for i, overlay in enumerate(image_overlays):
-            # Download/get local path
-            local_image_path = download_image_if_needed(overlay['image_url'], upload_dir)
-            input_files.extend(["-i", local_image_path])
+        if alignment == 'left' or alignment == 'top-left':
+            x_pos = f"W*{margin_l_ratio}-{size}-{spacing_px}"
+        elif alignment == 'right' or alignment == 'top-right':
+            x_pos = f"W*(1-{margin_r_ratio})-{size}-{spacing_px}"
+        else:
+            x_pos = f"(W/2)-{size}-{spacing_px}"
 
-        filter_parts = []
-        current_label = "[0:v]"
-        
-        # 1. Apply Danmaku if exists
-        if danmaku_filter:
-            filter_parts.append(f"{current_label}{danmaku_filter}[danmaku]")
-            current_label = "[danmaku]"
+        if alignment.startswith('top'): y_pos = f"{margin_v}+20"
 
-        # 2. Apply Main Subtitles
-        filter_parts.append(f"{current_label}{sub_filter}[subt]")
-        current_label = "[subt]"
+        next_label = f"[v_prefix_{i}]"
+        filter_parts.append(
+            f"[{img_idx}:v]scale={size}:{size}[pimg{i}]; "
+            f"{current_label}[pimg{i}]overlay=x={x_pos}:y={y_pos}:enable='between(t,{overlay['start']},{overlay['end']})'{next_label}"
+        )
+        current_label = next_label
 
-        # 3. Overlay images on top of subtitles
-        for i, overlay in enumerate(image_overlays):
-            image_index = i + 1  # Input 0 is video, images start at 1
-
-            # Calculate position (same as before)
-            size = overlay['size']
-            margin_v = overlay['bottom_percent'] * 7
-            y_pos = f"H-{margin_v}-{size}"
-            
-            alignment = overlay['alignment']
-            if alignment in ['left', 'top-left']:
-                ass_margin_l = 150
-                ass_margin_r = 96
-            elif alignment in ['right', 'top-right']:
-                ass_margin_l = 96
-                ass_margin_r = 150
-            else:
-                ass_margin_l = 96
-                ass_margin_r = 96
-                
-            margin_l_ratio = ass_margin_l / 1920.0
-            margin_r_ratio = ass_margin_r / 1920.0
-            spacing_px = 10
-            
-            if alignment == 'left' or alignment == 'top-left':
-                x_pos = f"W*{margin_l_ratio}-{size}-{spacing_px}"
-            elif alignment == 'right' or alignment == 'top-right':
-                x_pos = f"W*(1-{margin_r_ratio})-{size}-{spacing_px}"
-            else:
-                x_pos = f"(W/2)-{size}-{spacing_px}"
-
-            if alignment.startswith('top'):
-                y_pos = f"{margin_v}+20"
-
-            next_label = f"[v{i+1}]"
+    # 4. Overlay Membership Emojis
+    emoji_start_idx = prefix_start_idx + len(prefix_overlays)
+    if emoji_overlays:
+        for i, overlay in enumerate(emoji_overlays):
+            img_idx = emoji_start_idx + unique_emoji_paths.index(overlay['path'])
+            next_label = f"[v_emoji_{i}]"
             filter_parts.append(
-                f"[{image_index}:v]scale={size}:{size}[img{i}]; "
-                f"{current_label}[img{i}]overlay=x={x_pos}:y={y_pos}:enable='between(t,{overlay['start']},{overlay['end']})'{next_label}"
+                f"[{img_idx}:v]scale={overlay['size']}:{overlay['size']}[eimg{i}]; "
+                f"{current_label}[eimg{i}]overlay=x='{overlay['x_expr']}':y={overlay['y_pos']}:enable='between(t,{overlay['start']:.3f},{overlay['end']:.3f})'{next_label}"
             )
             current_label = next_label
 
-        # Final output label
-        if image_overlays:
-            last_filter = filter_parts[-1]
-            filter_parts[-1] = last_filter.replace(f'[v{len(image_overlays)}]', '[out]')
-        else:
-            # If no images, the last filter output is [subt] (or [danmaku] if no subt?? No, subt acts as passthrough if no events?)
-            # Actually, standard subtitles always run.
-            
-            # If we had images loop, last_label was updated.
-            # If we didn't enter image loop, current_label is [subt].
-            # Just map current_label to [out] via a null filter or just reuse the name?
-            # Easier to rename the last output.
-            
-            # Rewrite last filter to output [out]
-            last_filter = filter_parts[-1]
-            # Replace the output label of the last filter
-            if "[subt]" in last_filter:
-                filter_parts[-1] = last_filter.replace("[subt]", "[out]")
-
+    # Final mapping
+    if not filter_parts:
+        # Simple burn if only ASS
+        cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", sub_filter, "-c:a", "copy", output_path]
+    else:
+        # Replace last label with [out]
+        last_f = filter_parts[-1]
+        filter_parts[-1] = last_f[:last_f.rfind('[')] + "[out]"
         filter_complex = ";".join(filter_parts)
 
         cmd = [
-            "ffmpeg",
-            "-y",
+            "ffmpeg", "-y",
             *input_files,
             "-filter_complex", filter_complex,
             "-map", "[out]",
-            "-map", "0:a?",  # Copy audio if exists
+            "-map", "0:a?",
             "-c:a", "copy",
             output_path
         ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-
     if result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
 

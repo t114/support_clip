@@ -362,11 +362,30 @@ async def burn_subtitles(request: BurnRequest):
                 w = v_info.get('width', 1920) or 1920
                 h = v_info.get('height', 1080) or 1080
                 
-                generate_danmaku_ass(
+                # Load emoji mapping for the channel
+                emoji_map = None
+                emoji_dir = None
+                info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+                if os.path.exists(info_file):
+                    try:
+                        with open(info_file, 'r', encoding='utf-8') as f_i:
+                            v_info_json = json.load(f_i)
+                            channel_id = v_info_json.get('channel_id')
+                            if channel_id:
+                                emoji_dir = os.path.join(EMOJIS_DIR, channel_id)
+                                map_path = os.path.join(emoji_dir, "map.json")
+                                if os.path.exists(map_path):
+                                    with open(map_path, 'r', encoding='utf-8') as f_m:
+                                        emoji_map = json.load(f_m)
+                    except: pass
+
+                danmaku_ass_path, emoji_overlays = generate_danmaku_ass(
                     comments_data,
                     danmaku_ass_path,
                     resolution_x=w,
-                    resolution_y=h
+                    resolution_y=h,
+                    emoji_map=emoji_map,
+                    emoji_dir=emoji_dir
                 )
 
         # Burn subtitles (now with image prefix support and danmaku)
@@ -382,7 +401,8 @@ async def burn_subtitles(request: BurnRequest):
             style_map=request.style_map,
             default_style=cleaned_styles,
             upload_dir=UPLOAD_DIR,
-            danmaku_ass_path=danmaku_ass_path
+            danmaku_ass_path=danmaku_ass_path,
+            emoji_overlays=emoji_overlays if 'emoji_overlays' in locals() else None
         )
 
         return {"filename": output_filename}
@@ -1040,14 +1060,42 @@ async def create_clip(request: ClipRequest):
                 w = v_info.get('width', 1920) or 1920
                 h = v_info.get('height', 1080) or 1080
                 
-                generate_danmaku_ass(
+                # Load emoji mapping for the channel
+                emoji_map = None
+                emoji_dir = None
+                info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+                if os.path.exists(info_file):
+                    try:
+                        with open(info_file, 'r', encoding='utf-8') as f_i:
+                            v_info_json = json.load(f_i)
+                            channel_id = v_info_json.get('channel_id')
+                            if channel_id:
+                                emoji_dir = os.path.join(EMOJIS_DIR, channel_id)
+                                map_path = os.path.join(emoji_dir, "map.json")
+                                if os.path.exists(map_path):
+                                    with open(map_path, 'r', encoding='utf-8') as f_m:
+                                        emoji_map = json.load(f_m)
+                    except: pass
+
+                danmaku_ass_path, emoji_overlays = generate_danmaku_ass(
                     clip_comments,
                     danmaku_ass_path,
                     resolution_x=w,
-                    resolution_y=h
+                    resolution_y=h,
+                    emoji_map=emoji_map,
+                    emoji_dir=emoji_dir
                 )
 
-        extract_clip(video_path, request.start, request.end, output_path, crop_params=crop_params, danmaku_ass_path=danmaku_ass_path, aspect_ratio=request.aspect_ratio)
+        extract_clip(
+            video_path, 
+            request.start, 
+            request.end, 
+            output_path, 
+            crop_params=crop_params, 
+            danmaku_ass_path=danmaku_ass_path, 
+            aspect_ratio=request.aspect_ratio,
+            emoji_overlays=emoji_overlays if 'emoji_overlays' in locals() else None
+        )
 
         return {
             "video_url": f"/static/{output_filename}",

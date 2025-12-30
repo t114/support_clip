@@ -49,29 +49,13 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
         }
 
         // Split by emoji patterns (e.g. :_mioハトタウロス: or :miko_kusa:)
+        // Matches anything between colons that doesn't contain a colon or space
         const parts = text.split(/(:[^:\s]+:)/);
-
-        // Helper for robust lookup
-        const getEmojiImage = (part) => {
-            // 1. Direct match
-            if (emojiMap[part]) return emojiMap[part];
-
-            // 2. Case-insensitive match
-            const lowerPart = part.toLowerCase();
-            const foundKey = Object.keys(emojiMap).find(k => k.toLowerCase() === lowerPart);
-            if (foundKey) return emojiMap[foundKey];
-
-            // 3. Fuzzy match (ignore underscores and case)
-            const clean = part.replace(/[:_]/g, '').toLowerCase();
-            const foundFuzzy = Object.keys(emojiMap).find(k => k.replace(/[:_]/g, '').toLowerCase() === clean);
-            if (foundFuzzy) return emojiMap[foundFuzzy];
-
-            return null;
-        };
 
         return parts.map((part, i) => {
             if (part.startsWith(':') && part.endsWith(':')) {
-                const imgName = getEmojiImage(part);
+                // Direct lookup in the emoji map
+                const imgName = emojiMap[part];
                 if (imgName) {
                     return (
                         <img
