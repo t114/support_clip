@@ -44,24 +44,45 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
 
     // Function to render text with emojis
     const renderCommentContent = (text) => {
-        if (!Object.keys(emojiMap).length) return text;
+        if (!Object.keys(emojiMap).length) {
+            return text;
+        }
 
-        // Split by emoji patterns (e.g. :_mioハトタウロス:)
-        // We use a regex that matches shortcuts in the map
-        const parts = text.split(/(:[A-Za-z0-9_-]+:)/);
+        // Split by emoji patterns (e.g. :_mioハトタウロス: or :miko_kusa:)
+        const parts = text.split(/(:[^:\s]+:)/);
+
+        // Helper for robust lookup
+        const getEmojiImage = (part) => {
+            // 1. Direct match
+            if (emojiMap[part]) return emojiMap[part];
+
+            // 2. Case-insensitive match
+            const lowerPart = part.toLowerCase();
+            const foundKey = Object.keys(emojiMap).find(k => k.toLowerCase() === lowerPart);
+            if (foundKey) return emojiMap[foundKey];
+
+            // 3. Fuzzy match (ignore underscores and case)
+            const clean = part.replace(/[:_]/g, '').toLowerCase();
+            const foundFuzzy = Object.keys(emojiMap).find(k => k.replace(/[:_]/g, '').toLowerCase() === clean);
+            if (foundFuzzy) return emojiMap[foundFuzzy];
+
+            return null;
+        };
 
         return parts.map((part, i) => {
-            if (part.startsWith(':') && part.endsWith(':') && emojiMap[part]) {
-                const imgName = emojiMap[part];
-                return (
-                    <img
-                        key={i}
-                        src={`/static/emojis/${channelId}/${imgName}`}
-                        alt={part}
-                        className="inline-block align-middle"
-                        style={{ height: `${fontSize * 1.2}px`, margin: '0 2px' }}
-                    />
-                );
+            if (part.startsWith(':') && part.endsWith(':')) {
+                const imgName = getEmojiImage(part);
+                if (imgName) {
+                    return (
+                        <img
+                            key={i}
+                            src={`/static/emojis/${channelId}/${imgName}`}
+                            alt={part}
+                            className="inline-block align-middle"
+                            style={{ height: `${fontSize * 1.2}px`, margin: '0 2px' }}
+                        />
+                    );
+                }
             }
             return part;
         });
