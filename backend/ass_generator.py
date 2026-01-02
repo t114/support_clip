@@ -373,6 +373,7 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
                         new_parts.append("  ") 
                         current_offset_chars += 2
                     else:
+                        # logger.warning(f"generate_danmaku_ass: Image file not found at {img_path}")
                         new_parts.append(part)
                         current_offset_chars += len(part)
                 else:

@@ -17,7 +17,10 @@ start:
 	@echo "Stopping any existing server..."
 	@$(MAKE) -s stop
 	@echo "Starting backend server..."
-	@nohup $(UVICORN) backend.main:app --reload --host 0.0.0.0 --port 8000 --log-config log_config.ini > $(LOG_FILE) 2>&1 & echo $$! > $(PID_FILE)
+	@nohup $(UVICORN) backend.main:app --reload --reload-dir backend --host 0.0.0.0 --port 8000 --log-config log_config.ini \
+		--reload-exclude "backend/uploads/*" \
+		--reload-exclude "*/__pycache__/*" \
+		> $(LOG_FILE) 2>&1 & echo $$! > $(PID_FILE)
 	@echo "Server started. Run 'make logs' to view output."
 
 stop:

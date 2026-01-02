@@ -117,7 +117,11 @@
 
         if (shortcut && shortcut.startsWith(':') && shortcut.endsWith(':') && src) {
             const url = normalizeUrl(src);
-            if (url && (url.includes('yt3.ggpht.com') || url.includes('googleusercontent.com'))) {
+            if (url && (
+                url.includes('yt3.ggpht.com') ||
+                url.includes('googleusercontent.com') ||
+                url.includes('www.gstatic.com/youtube/img/emoji')
+            )) {
                 // Exclude some common icons that look like emojis
                 if (url.includes('fonts.gstatic.com')) return;
                 emojis[shortcut] = url;

@@ -7,7 +7,7 @@ const FONT_SIZE_RATIO = 48 / 1080; // Same ratio as backend (48px at 1080p)
 export default function DanmakuLayer({ comments, currentTime, enabled = true, density = 100, videoHeight = 1080, channelId }) {
     const [emojiMap, setEmojiMap] = useState({});
 
-    // Fetch emoji map when channelId changes
+    // Fetch emoji map when channelId changes or comments update (as backend might have discovered new emojis)
     useEffect(() => {
         if (channelId) {
             fetch(`/static/emojis/${channelId}/map.json`)
@@ -21,7 +21,7 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
                     setEmojiMap({});
                 });
         }
-    }, [channelId]);
+    }, [channelId, comments]);
 
     // Filter active comments based on broad range and density
     const activeComments = useMemo(() => {

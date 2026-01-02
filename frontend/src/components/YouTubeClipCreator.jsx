@@ -62,6 +62,19 @@ function YouTubeClipCreator() {
         }
     }, [videoInfo]);
 
+    // Fetch all Hololive members for manual addition
+    const [allMembers, setAllMembers] = useState([]);
+    useEffect(() => {
+        fetch('/hololive-members')
+            .then(res => res.json())
+            .then(data => {
+                if (data.members) {
+                    setAllMembers(data.members);
+                }
+            })
+            .catch(err => console.error('Failed to load members:', err));
+    }, []);
+
     // YouTube URLからt=パラメータを抽出
     const extractStartTimeFromUrl = (url) => {
         try {
@@ -925,13 +938,15 @@ function YouTubeClipCreator() {
                 )
             }
 
-            <DescriptionModal
-                isOpen={isDescriptionModalOpen}
-                onClose={() => setIsDescriptionModalOpen(false)}
-                initialDescription={generatedDescription}
-                detectedMembers={detectedMembers}
-            />
-
+            {isDescriptionModalOpen && (
+                <DescriptionModal
+                    isOpen={isDescriptionModalOpen}
+                    onClose={() => setIsDescriptionModalOpen(false)}
+                    initialDescription={generatedDescription}
+                    detectedMembers={detectedMembers}
+                    allMembers={allMembers}
+                />
+            )}
             <TwitterModal
                 isOpen={isTwitterModalOpen}
                 onClose={() => setIsTwitterModalOpen(false)}

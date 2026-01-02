@@ -130,7 +130,7 @@ class SyncEmojiRequest(BaseModel):
     channel_id: str
     emojis: Dict[str, str] # shortcut -> url
 
-def extract_text_from_runs(runs):
+def extract_text_from_runs(runs, collected_emojis=None):
     """Helper to extract text and emoji shortcuts from YouTube message runs"""
     text = ""
     for run in runs:
@@ -139,15 +139,81 @@ def extract_text_from_runs(runs):
         elif 'emoji' in run:
             emoji = run['emoji']
             shortcuts = emoji.get('shortcuts', [])
+            shortcut = None
             if shortcuts:
                 # Use the first shortcut (e.g. :_mioハトタウロス:)
-                text += shortcuts[0]
+                shortcut = shortcuts[0]
             else:
                 # Fallback to image label
                 label = emoji.get('image', {}).get('accessibility', {}).get('accessibilityData', {}).get('label', '')
                 if label:
-                    text += f":{label}:"
+                    shortcut = f":{label}:"
+            
+            if shortcut:
+                text += shortcut
+                if collected_emojis is not None:
+                    thumbnails = emoji.get('image', {}).get('thumbnails', [])
+                    if thumbnails:
+                        url = thumbnails[-1].get('url')
+                        collected_emojis[shortcut] = url
+                        # logger.debug(f"Collected emoji: {shortcut} -> {url}") 
     return text
+
+def save_emojis_to_disk(channel_id, emoji_data):
+    """Save emoji images to disk and update mapping file"""
+    if not channel_id or channel_id == "UNKNOWN_CHANNEL":
+        return
+        
+    channel_dir = os.path.join(EMOJIS_DIR, channel_id)
+    os.makedirs(channel_dir, exist_ok=True)
+    mapping_file = os.path.join(channel_dir, "map.json")
+    
+    # Load existing map
+    local_mapping = {}
+    if os.path.exists(mapping_file):
+        try:
+            with open(mapping_file, 'r', encoding='utf-8') as f:
+                local_mapping = json.load(f)
+        except: pass
+        
+    updated = False
+    logger.info(f"Saving emojis for {channel_id}. Found {len(emoji_data)} emojis to check.")
+    for shortcut, url in emoji_data.items():
+        if shortcut in local_mapping: continue
+        
+        logger.info(f"Downloading new emoji: {shortcut} from {url}")
+        
+        # Sanitize shortcut to use as filename
+        safe_name = "".join([c for c in shortcut if c.isalnum() or c in "_-"]).strip("_")
+        if not safe_name: safe_name = f"emoji_{hash(shortcut)}"
+        
+        # Identify extension from URL if possible, otherwise .png
+        ext = ".png"
+        if ".webp" in url: ext = ".webp"
+        elif ".gif" in url: ext = ".gif"
+        
+        filename = f"{safe_name}{ext}"
+        file_path = os.path.join(channel_dir, filename)
+        
+        # Download if not exists
+        if not os.path.exists(file_path):
+            try:
+                resp = requests.get(url, stream=True, timeout=10)
+                if resp.status_code == 200:
+                    with open(file_path, 'wb') as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                    local_mapping[shortcut] = filename
+                    updated = True
+            except Exception as e:
+                logger.warning(f"Failed to auto-download emoji {shortcut}: {e}")
+        else:
+            local_mapping[shortcut] = filename
+            updated = True
+            
+    if updated:
+        with open(mapping_file, 'w', encoding='utf-8') as f:
+            json.dump(local_mapping, f, ensure_ascii=False, indent=2)
 
 def extract_comments(base_name):
     """Refactored helper to extract comments from json files"""
@@ -158,6 +224,17 @@ def extract_comments(base_name):
     
     logger.info(f"Extracting comments for {base_name}. Checking files...")
     
+    collected_emojis = {}
+    channel_id = None
+    
+    # Try to get channel_id from info file first to know where to save emojis
+    if os.path.exists(info_file):
+        try:
+            with open(info_file, 'r', encoding='utf-8') as f:
+                info = json.load(f)
+                channel_id = info.get('channel_id')
+        except: pass
+
     if os.path.exists(live_chat_file):
         logger.info(f"Found live chat file: {live_chat_file}")
         with open(live_chat_file, 'r', encoding='utf-8') as f:
@@ -190,25 +267,25 @@ def extract_comments(base_name):
                         if 'liveChatTextMessageRenderer' in item:
                             renderer = item['liveChatTextMessageRenderer']
                             text_runs = renderer.get('message', {}).get('runs', [])
-                            text = extract_text_from_runs(text_runs)
+                            text = extract_text_from_runs(text_runs, collected_emojis)
                         elif 'liveChatPaidMessageRenderer' in item:
                             renderer = item['liveChatPaidMessageRenderer']
                             text_runs = renderer.get('message', {}).get('runs', [])
-                            text = extract_text_from_runs(text_runs)
+                            text = extract_text_from_runs(text_runs, collected_emojis)
                             purchase_amount = renderer.get('purchaseAmountText', {}).get('simpleText', '')
                             if purchase_amount:
                                 text = f"[{purchase_amount}] {text}"
                         elif 'liveChatMembershipItemRenderer' in item:
                             renderer = item['liveChatMembershipItemRenderer']
                             header_runs = renderer.get('headerSubtext', {}).get('runs', [])
-                            header_text = extract_text_from_runs(header_runs)
+                            header_text = extract_text_from_runs(header_runs, collected_emojis)
                             msg_runs = renderer.get('message', {}).get('runs', [])
-                            msg_text = extract_text_from_runs(msg_runs)
+                            msg_text = extract_text_from_runs(msg_runs, collected_emojis)
                             text = f"{header_text} {msg_text}".strip()
                         elif 'liveChatSponsorshipGiftRedemptionAnnouncementRenderer' in item:
                             renderer = item['liveChatSponsorshipGiftRedemptionAnnouncementRenderer']
                             msg_runs = renderer.get('message', {}).get('runs', [])
-                            text = extract_text_from_runs(msg_runs)
+                            text = extract_text_from_runs(msg_runs, collected_emojis)
                             
                         if text:
                             # Use packet offset as default, override if renderer has its own (unlikely but possible)
@@ -239,6 +316,10 @@ def extract_comments(base_name):
                             comments_data.append({'text': text, 'timestamp': float(timestamp)})
         except Exception as e:
             logger.error(f"Error reading info.json comments: {e}")
+            
+    # Save any new emojis discovered
+    if collected_emojis and channel_id:
+        save_emojis_to_disk(channel_id, collected_emojis)
             
     logger.info(f"Extracted {len(comments_data)} comments total.")
     return comments_data

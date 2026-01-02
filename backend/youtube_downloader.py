@@ -115,6 +115,7 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                             'writeinfojson': True,  # info.jsonを保存（コメント含む）
                             'getcomments': True,    # コメントを取得
                             'writesubtitles': True, # 字幕（ライブチャット含む）を取得
+                            'writeautomaticsub': True, # 自動生成字幕（一部のライブチャット）も取得
                             'subtitleslangs': ['live_chat'], # ライブチャットを指定
                             'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
                             'quiet': False,
@@ -216,6 +217,7 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                     'writeinfojson': True,
                     'getcomments': True,
                     'writesubtitles': True,
+                    'writeautomaticsub': True,
                     'subtitleslangs': ['live_chat'],
                     'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
                     'quiet': False,

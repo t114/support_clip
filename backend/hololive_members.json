@@ -569,6 +569,340 @@
         "さやか",
         "Sayaka"
       ]
+    },
+    {
+      "name_ja": "アユンダ・リス",
+      "name_en": "Ayunda Risu",
+      "channel_url": "https://www.youtube.com/@AyundaRisu",
+      "generation": "ID 1期生",
+      "fan_name": "Risuners",
+      "keywords": [
+        "アユンダ・リス",
+        "リス",
+        "Risu"
+      ]
+    },
+    {
+      "name_ja": "ムーナ・ホシノヴァ",
+      "name_en": "Moona Hoshinova",
+      "channel_url": "https://www.youtube.com/@MoonaHoshinova",
+      "generation": "ID 1期生",
+      "fan_name": "Moonafic",
+      "keywords": [
+        "ムーナ・ホシノヴァ",
+        "ムーナ",
+        "Moona"
+      ]
+    },
+    {
+      "name_ja": "アイラニ・イオフィフティーン",
+      "name_en": "Airani Iofifteen",
+      "channel_url": "https://www.youtube.com/@AiraniIofifteen",
+      "generation": "ID 1期生",
+      "fan_name": "Ioforia",
+      "keywords": [
+        "アイラニ・イオフィフティーン",
+        "イオフィ",
+        "Iofi"
+      ]
+    },
+    {
+      "name_ja": "クレイジー・オリー",
+      "name_en": "Kureiji Ollie",
+      "channel_url": "https://www.youtube.com/@KureijiOllie",
+      "generation": "ID 2期生",
+      "fan_name": "Zomrade",
+      "keywords": [
+        "クレイジー・オリー",
+        "オリー",
+        "Ollie"
+      ]
+    },
+    {
+      "name_ja": "アーニャ・メルフィッサ",
+      "name_en": "Anya Melfissa",
+      "channel_url": "https://www.youtube.com/@AnyaMelfissa",
+      "generation": "ID 2期生",
+      "fan_name": "Melfriend",
+      "keywords": [
+        "アーニャ・メルフィッサ",
+        "アーニャ",
+        "Anya"
+      ]
+    },
+    {
+      "name_ja": "パヴォリア・レイネ",
+      "name_en": "Pavolia Reine",
+      "channel_url": "https://www.youtube.com/@PavoliaReine",
+      "generation": "ID 2期生",
+      "fan_name": "Merakyats",
+      "keywords": [
+        "パヴォリア・レイネ",
+        "レイネ",
+        "Reine"
+      ]
+    },
+    {
+      "name_ja": "ベスティア・ゼータ",
+      "name_en": "Vestia Zeta",
+      "channel_url": "https://www.youtube.com/@VestiaZeta",
+      "generation": "ID 3期生",
+      "fan_name": "Zecretary",
+      "keywords": [
+        "ベスティア・ゼータ",
+        "ゼータ",
+        "Zeta"
+      ]
+    },
+    {
+      "name_ja": "カエラ・コヴァルスキア",
+      "name_en": "Kaela Kovalskia",
+      "channel_url": "https://www.youtube.com/@KaelaKovalskia",
+      "generation": "ID 3期生",
+      "fan_name": "Pemalaskia",
+      "keywords": [
+        "カエラ・コヴァルスキア",
+        "カエラ",
+        "Kaela"
+      ]
+    },
+    {
+      "name_ja": "こぼ・かなえる",
+      "name_en": "Kobo Kanaeru",
+      "channel_url": "https://www.youtube.com/@KoboKanaeru",
+      "generation": "ID 3期生",
+      "fan_name": "Kobokerz",
+      "keywords": [
+        "こぼ・かなえる",
+        "こぼ",
+        "Kobo"
+      ]
+    },
+    {
+      "name_ja": "森カリオペ",
+      "name_en": "Mori Calliope",
+      "channel_url": "https://www.youtube.com/@MoriCalliope",
+      "generation": "EN Myth",
+      "fan_name": "Dead Beats",
+      "keywords": [
+        "森カリオペ",
+        "カリオペ",
+        "Calli"
+      ]
+    },
+    {
+      "name_ja": "小鳥遊キアラ",
+      "name_en": "Takanashi Kiara",
+      "channel_url": "https://www.youtube.com/@TakanashiKiara",
+      "generation": "EN Myth",
+      "fan_name": "KFP",
+      "keywords": [
+        "小鳥遊キアラ",
+        "キアラ",
+        "Kiara"
+      ]
+    },
+    {
+      "name_ja": "一伊那尓栖",
+      "name_en": "Ninomae Ina'nis",
+      "channel_url": "https://www.youtube.com/@NinomaeInanis",
+      "generation": "EN Myth",
+      "fan_name": "Takodachi",
+      "keywords": [
+        "一伊那尓栖",
+        "イナ",
+        "Ina"
+      ]
+    },
+    {
+      "name_ja": "がうる・ぐら",
+      "name_en": "Gawr Gura",
+      "channel_url": "https://www.youtube.com/@GawrGura",
+      "generation": "EN Myth",
+      "fan_name": "Chumbuds",
+      "keywords": [
+        "がうる・ぐら",
+        "ぐら",
+        "Gura"
+      ]
+    },
+    {
+      "name_ja": "ワトソン・アメリア",
+      "name_en": "Watson Amelia",
+      "channel_url": "https://www.youtube.com/@WatsonAmelia",
+      "generation": "EN Myth",
+      "fan_name": "Teamates",
+      "keywords": [
+        "ワトソン・アメリア",
+        "アメリア",
+        "Ame"
+      ]
+    },
+    {
+      "name_ja": "IRyS",
+      "name_en": "IRyS",
+      "channel_url": "https://www.youtube.com/@IRyS",
+      "generation": "EN Promise",
+      "fan_name": "Irystocrats",
+      "keywords": [
+        "IRyS"
+      ]
+    },
+    {
+      "name_ja": "セレス・ファウナ",
+      "name_en": "Ceres Fauna",
+      "channel_url": "https://www.youtube.com/@CeresFauna",
+      "generation": "EN Promise",
+      "fan_name": "Saplings",
+      "keywords": [
+        "セレス・ファウナ",
+        "ファウナ",
+        "Fauna"
+      ]
+    },
+    {
+      "name_ja": "オーロ・クロニー",
+      "name_en": "Ouro Kronii",
+      "channel_url": "https://www.youtube.com/@OuroKronii",
+      "generation": "EN Promise",
+      "fan_name": "Kronies",
+      "keywords": [
+        "オーロ・クロニー",
+        "クロニー",
+        "Kronii"
+      ]
+    },
+    {
+      "name_ja": "七詩ムメイ",
+      "name_en": "Nanashi Mumei",
+      "channel_url": "https://www.youtube.com/@NanashiMumei",
+      "generation": "EN Promise",
+      "fan_name": "Hoomans",
+      "keywords": [
+        "七詩ムメイ",
+        "ムメイ",
+        "Mumei"
+      ]
+    },
+    {
+      "name_ja": "ハコス・ベールズ",
+      "name_en": "Hakos Baelz",
+      "channel_url": "https://www.youtube.com/@HakosBaelz",
+      "generation": "EN Promise",
+      "fan_name": "Brat",
+      "keywords": [
+        "ハコス・ベールズ",
+        "ベールズ",
+        "Bae"
+      ]
+    },
+    {
+      "name_ja": "シオリ・ノヴェラ",
+      "name_en": "Shiori Novella",
+      "channel_url": "https://www.youtube.com/@ShioriNovella",
+      "generation": "EN Advent",
+      "fan_name": "Novellites",
+      "keywords": [
+        "シオリ・ノヴェラ",
+        "シオリ",
+        "Shiori"
+      ]
+    },
+    {
+      "name_ja": "古石ビジュ",
+      "name_en": "Koseki Bijou",
+      "channel_url": "https://www.youtube.com/@KosekiBijou",
+      "generation": "EN Advent",
+      "fan_name": "Pebbles",
+      "keywords": [
+        "古石ビジュ",
+        "ビジュ",
+        "Bijou"
+      ]
+    },
+    {
+      "name_ja": "ネリッサ・レイヴンクロフト",
+      "name_en": "Nerissa Ravencroft",
+      "channel_url": "https://www.youtube.com/@NerissaRavencroft",
+      "generation": "EN Advent",
+      "fan_name": "Jailbirds",
+      "keywords": [
+        "ネリッサ・レイヴンクロフト",
+        "ネリッサ",
+        "Nerissa"
+      ]
+    },
+    {
+      "name_ja": "フワワ・アビスガード",
+      "name_en": "Fuwawa Abyssgard",
+      "channel_url": "https://www.youtube.com/@FUWAMOCOch",
+      "generation": "EN Advent",
+      "fan_name": "Ruffians",
+      "keywords": [
+        "フワワ・アビスガード",
+        "フワワ",
+        "Fuwawa"
+      ]
+    },
+    {
+      "name_ja": "モココ・アビスガード",
+      "name_en": "Mococo Abyssgard",
+      "channel_url": "https://www.youtube.com/@FUWAMOCOch",
+      "generation": "EN Advent",
+      "fan_name": "Ruffians",
+      "keywords": [
+        "モココ・アビスガード",
+        "モココ",
+        "Mococo"
+      ]
+    },
+    {
+      "name_ja": "エリザベス・ローズ・ブラッドフレイム",
+      "name_en": "Elizabeth Rose Bloodflame",
+      "channel_url": "https://www.youtube.com/@ElizabethRoseBloodflame",
+      "generation": "EN Justice",
+      "fan_name": "Roses",
+      "keywords": [
+        "エリザベス・ローズ・ブラッドフレイム",
+        "エリザベス",
+        "ERB"
+      ]
+    },
+    {
+      "name_ja": "ジジ・ムリン",
+      "name_en": "Gigi Murin",
+      "channel_url": "https://www.youtube.com/@GigiMurin",
+      "generation": "EN Justice",
+      "fan_name": "Gremlins",
+      "keywords": [
+        "ジジ・ムリン",
+        "ジジ",
+        "Gigi"
+      ]
+    },
+    {
+      "name_ja": "セシリア・イマーグリーン",
+      "name_en": "Cecilia Immergreen",
+      "channel_url": "https://www.youtube.com/@CeciliaImmergreen",
+      "generation": "EN Justice",
+      "fan_name": "Automatons",
+      "keywords": [
+        "セシリア・イマーグリーン",
+        "セシリア",
+        "Cecilia"
+      ]
+    },
+    {
+      "name_ja": "ラオーラ・パンテーラ",
+      "name_en": "Raora Panthera",
+      "channel_url": "https://www.youtube.com/@RaoraPanthera",
+      "generation": "EN Justice",
+      "fan_name": "Chattini",
+      "keywords": [
+        "ラオーラ・パンテーラ",
+        "ラオーラ",
+        "Raora"
+      ]
     }
   ]
 }

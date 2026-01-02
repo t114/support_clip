@@ -158,22 +158,9 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
     filter_parts = []
 
     # Handle Prefix Images (Per-cue icons)
-    # These are downloaded and added as inputs
+    # Convert paths to movie filter inputs
     prefix_img_paths = [download_image_if_needed(o['image_url'], upload_dir) for o in prefix_overlays]
-    for p in prefix_img_paths:
-        input_files.extend(["-i", p])
-
-    # Handle Membership Emojis
-    # These are local files, already synced
-    unique_emoji_paths = []
-    if emoji_overlays:
-        for overlay in emoji_overlays:
-            if overlay['path'] not in unique_emoji_paths:
-                unique_emoji_paths.append(overlay['path'])
     
-    for p in unique_emoji_paths:
-        input_files.extend(["-i", os.path.abspath(p)])
-
     # 1. Apply Danmaku if exists
     if danmaku_filter:
         filter_parts.append(f"{current_label}{danmaku_filter}[danmaku]")
@@ -183,10 +170,15 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
     filter_parts.append(f"{current_label}{sub_filter}[subt]")
     current_label = "[subt]"
 
-    # 3. Overlay Prefix Images
-    prefix_start_idx = 1 # Input 0 is video
+    # 3. Overlay Prefix Images using movie filter
     for i, overlay in enumerate(prefix_overlays):
-        img_idx = prefix_start_idx + i
+        path = prefix_img_paths[i]
+        # Escape path
+        safe_path = path.replace("\\", "/").replace(":", "\\:").replace("'", "'\\\\\\''")
+        
+        # Load image
+        filter_parts.append(f"movie='{safe_path}'[raw_p_{i}]")
+        
         size = overlay['size']
         margin_v = overlay['bottom_percent'] * 7
         y_pos = f"H-{margin_v}-{size}"
@@ -209,19 +201,22 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
 
         next_label = f"[v_prefix_{i}]"
         filter_parts.append(
-            f"[{img_idx}:v]scale={size}:{size}[pimg{i}]; "
+            f"[raw_p_{i}]scale={size}:{size}[pimg{i}]; "
             f"{current_label}[pimg{i}]overlay=x={x_pos}:y={y_pos}:enable='between(t,{overlay['start']},{overlay['end']})'{next_label}"
         )
         current_label = next_label
 
-    # 4. Overlay Membership Emojis
-    emoji_start_idx = prefix_start_idx + len(prefix_overlays)
+    # 4. Overlay Membership Emojis using movie filter
     if emoji_overlays:
         for i, overlay in enumerate(emoji_overlays):
-            img_idx = emoji_start_idx + unique_emoji_paths.index(overlay['path'])
+            path = overlay['path']
+            safe_path = os.path.abspath(path).replace("\\", "/").replace(":", "\\:").replace("'", "'\\\\\\''")
+            
+            filter_parts.append(f"movie='{safe_path}'[raw_e_{i}]")
+            
             next_label = f"[v_emoji_{i}]"
             filter_parts.append(
-                f"[{img_idx}:v]scale={overlay['size']}:{overlay['size']}[eimg{i}]; "
+                f"[raw_e_{i}]scale={overlay['size']}:{overlay['size']}[eimg{i}]; "
                 f"{current_label}[eimg{i}]overlay=x='{overlay['x_expr']}':y={overlay['y_pos']}:enable='between(t,{overlay['start']:.3f},{overlay['end']:.3f})'{next_label}"
             )
             current_label = next_label
@@ -232,14 +227,20 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
         cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", sub_filter, "-c:a", "copy", output_path]
     else:
         # Replace last label with [out]
+        # Replace last label with [out]
         last_f = filter_parts[-1]
         filter_parts[-1] = last_f[:last_f.rfind('[')] + "[out]"
         filter_complex = ";".join(filter_parts)
 
+        # Write filter_complex to file to avoid "Argument list too long"
+        filter_script_path = output_path + ".filter_complex"
+        with open(filter_script_path, "w", encoding="utf-8") as f:
+            f.write(filter_complex)
+
         cmd = [
             "ffmpeg", "-y",
             *input_files,
-            "-filter_complex", filter_complex,
+            "-filter_complex_script", filter_script_path,
             "-map", "[out]",
             "-map", "0:a?",
             "-c:a", "copy",
