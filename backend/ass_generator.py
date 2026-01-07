@@ -41,12 +41,22 @@ def seconds_to_ass_time(seconds):
     s = seconds % 60
     return f"{h}:{m:02d}:{s:05.2f}"
 
-def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=None):
+def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=None, video_info=None):
     """
     Generate an ASS file from VTT and styles.
     Supports multiple styles and per-line style mapping.
     """
     
+    # Calculate PlayRes multiplier for horizontal coordinates if aspect ratio is not 16:9
+    h_multiplier = 1.0
+    if video_info and video_info.get('width') and video_info.get('height'):
+        # PlayResX/Y are 1920x1080 (16:9). 
+        # If video is 9:16, width is 1080/1920 of height.
+        # multiplier = (H/W) * (16/9)
+        w = video_info['width']
+        h = video_info['height']
+        h_multiplier = (h / w) * (16 / 9)
+
     # Helper to generate style definition string
     def create_style_def(name, style_obj):
         # Apply 1.5x multiplier as requested by user to match preview appearance
@@ -107,6 +117,14 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         # For left/right alignment, add extra margin to ensure text doesn't touch edges
         if alignment in [1, 7]:  # left, top-left
             margin_l = 150  # ~8% from left edge
+            # Check if this style has a prefix image
+            if style_obj and style_obj.get('prefixImage'):
+                image_url = style_obj['prefixImage']
+                # Removed 1.5x multiplier to match preview
+                image_size = int(style_obj.get('prefixImageSize', 32))
+                spacing = 10
+                # Apply multiplier to match coordinate scaling in 9:16 videos
+                margin_l += int((image_size + spacing) * h_multiplier)
             margin_r = 96
         elif alignment in [3, 9]:  # right, top-right
             margin_l = 96

@@ -414,6 +414,10 @@ async def burn_subtitles(request: BurnRequest):
         with open(vtt_path, "w", encoding="utf-8") as f:
             f.write(request.subtitle_content)
 
+        # Get video resolution early for ASS and Danmaku generation
+        from .video_processing import get_video_info
+        v_info = get_video_info(video_path)
+
         # Generate ASS file with styles
         ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_modified.ass")
         generate_ass(
@@ -421,7 +425,8 @@ async def burn_subtitles(request: BurnRequest):
             cleaned_styles,
             ass_path,
             saved_styles=cleaned_saved_styles,
-            style_map=request.style_map
+            style_map=request.style_map,
+            video_info=v_info
         )
         
         # Generate Danmaku ASS if requested

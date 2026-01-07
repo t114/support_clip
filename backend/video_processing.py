@@ -86,7 +86,8 @@ def extract_prefix_images_from_vtt(vtt_path, saved_styles=None, style_map=None, 
             # Check if this style has a prefix image
             if style_obj and style_obj.get('prefixImage'):
                 image_url = style_obj['prefixImage']
-                image_size = style_obj.get('prefixImageSize', 32)
+                # Removed 1.5x multiplier to match preview
+                image_size = int(style_obj.get('prefixImageSize', 32))
 
                 # Get position info from style
                 bottom_percent = style_obj.get('bottom', 10)
@@ -171,6 +172,11 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
     current_label = "[subt]"
 
     # 3. Overlay Prefix Images using movie filter
+    # Get video info for scaling
+    from .video_processing import get_video_info
+    v_info = get_video_info(video_path)
+    h_scale = v_info.get('height', 1080) / 1080.0
+
     for i, overlay in enumerate(prefix_overlays):
         path = prefix_img_paths[i]
         # Escape path
@@ -179,8 +185,11 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
         # Load image
         filter_parts.append(f"movie='{safe_path}'[raw_p_{i}]")
         
-        size = overlay['size']
-        margin_v = overlay['bottom_percent'] * 7
+        # Scale size based on video height (matching libass text scaling)
+        base_size = overlay['size']
+        size = int(base_size * h_scale)
+        
+        margin_v = int(overlay['bottom_percent'] * 7 * h_scale)
         y_pos = f"H-{margin_v}-{size}"
         
         alignment = overlay['alignment']
@@ -188,10 +197,11 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
         ass_margin_r = 150 if alignment in ['right', 'top-right'] else 96
         margin_l_ratio = ass_margin_l / 1920.0
         margin_r_ratio = ass_margin_r / 1920.0
-        spacing_px = 10
+        spacing_px = int(10 * h_scale)
         
         if alignment == 'left' or alignment == 'top-left':
-            x_pos = f"W*{margin_l_ratio}-{size}-{spacing_px}"
+            # Start at margin_l. The text is shifted by MarginL in ASS.
+            x_pos = f"W*{margin_l_ratio}"
         elif alignment == 'right' or alignment == 'top-right':
             x_pos = f"W*(1-{margin_r_ratio})-{size}-{spacing_px}"
         else:
