@@ -90,7 +90,8 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         # shadow_offset_y = int(style_obj.get('shadowOffsetY', 0) * 1.5)
         
         # MarginV calculation (approximate)
-        margin_v = int(style_obj.get('bottom', 10) * 7)
+        # 1080 pixels is 100%, so 1% is 10.8 pixels
+        margin_v = int(style_obj.get('bottom', 10) * 10.8)
         
         # Alignment: 1=left, 2=center, 3=right (bottom row)
         # Add 4 for middle row, add 8 for top row

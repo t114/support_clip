@@ -189,7 +189,8 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
         base_size = overlay['size']
         size = int(base_size * h_scale)
         
-        margin_v = int(overlay['bottom_percent'] * 7 * h_scale)
+        # 10.8 matches the 1% unit in 1080p vertical resolution
+        margin_v = int(overlay['bottom_percent'] * 10.8 * h_scale)
         y_pos = f"H-{margin_v}-{size}"
         
         alignment = overlay['alignment']
