@@ -1,7 +1,8 @@
 import React from 'react';
 
-export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave, onLoad, onDelete, defaultStyleName, onSetDefault }) {
+export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave, onLoad, onDelete, defaultStyleName, onSetDefault, onStyleUsed }) {
     const [styleName, setStyleName] = React.useState('');
+    const [searchTerm, setSearchTerm] = React.useState('');
 
     const handleChange = (key, value) => {
         onStyleChange({ ...styles, [key]: value });
@@ -63,47 +64,65 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
                 {savedStyles && Object.keys(savedStyles).length > 0 && (
                     <div className="space-y-2">
                         <label className="block text-xs text-gray-600">保存済みスタイル:</label>
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="スタイルを検索..."
+                            className="w-full border border-gray-300 rounded px-2 py-1 text-sm mb-2"
+                        />
                         <div className="flex flex-wrap gap-2">
-                            {Object.keys(savedStyles).map(name => (
-                                <div
-                                    key={name}
-                                    className={`flex items-center border rounded px-2 py-1 text-sm ${defaultStyleName === name
-                                            ? 'bg-blue-100 border-blue-400'
-                                            : 'bg-white border-gray-300'
-                                        }`}
-                                >
-                                    {defaultStyleName === name && (
-                                        <span className="text-blue-600 mr-1 text-xs">★</span>
-                                    )}
-                                    <span
-                                        className="cursor-pointer hover:text-blue-600 mr-2"
-                                        onClick={() => {
-                                            onLoad(name);
-                                            setStyleName(name);
-                                        }}
-                                    >
-                                        {name}
-                                    </span>
-                                    {onSetDefault && (
-                                        <button
-                                            onClick={() => onSetDefault(defaultStyleName === name ? '' : name)}
-                                            className={`text-xs mr-1 ${defaultStyleName === name
-                                                    ? 'text-blue-600 hover:text-blue-800'
-                                                    : 'text-gray-400 hover:text-blue-600'
+                            {Object.keys(savedStyles)
+                                .filter(name => name.toLowerCase().includes(searchTerm.toLowerCase()))
+                                .length > 0 ? (
+                                Object.keys(savedStyles)
+                                    .filter(name => name.toLowerCase().includes(searchTerm.toLowerCase()))
+                                    .map(name => (
+                                        <div
+                                            key={name}
+                                            className={`flex items-center border rounded px-2 py-1 text-sm ${defaultStyleName === name
+                                                ? 'bg-blue-100 border-blue-400'
+                                                : 'bg-white border-gray-300'
                                                 }`}
-                                            title={defaultStyleName === name ? 'デフォルト解除' : 'デフォルトに設定'}
                                         >
-                                            {defaultStyleName === name ? '★' : '☆'}
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => onDelete(name)}
-                                        className="text-red-500 hover:text-red-700 text-xs"
-                                    >
-                                        ✕
-                                    </button>
+                                            {defaultStyleName === name && (
+                                                <span className="text-blue-600 mr-1 text-xs">★</span>
+                                            )}
+                                            <span
+                                                className="cursor-pointer hover:text-blue-600 mr-2"
+                                                onClick={() => {
+                                                    onLoad(name);
+                                                    setStyleName(name);
+                                                    if (onStyleUsed) onStyleUsed(name);
+                                                }}
+                                            >
+                                                {name}
+                                            </span>
+                                            {onSetDefault && (
+                                                <button
+                                                    onClick={() => onSetDefault(defaultStyleName === name ? '' : name)}
+                                                    className={`text-xs mr-1 ${defaultStyleName === name
+                                                        ? 'text-blue-600 hover:text-blue-800'
+                                                        : 'text-gray-400 hover:text-blue-600'
+                                                        }`}
+                                                    title={defaultStyleName === name ? 'デフォルト解除' : 'デフォルトに設定'}
+                                                >
+                                                    {defaultStyleName === name ? '★' : '☆'}
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => onDelete(name)}
+                                                className="text-red-500 hover:text-red-700 text-xs"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    ))
+                            ) : (
+                                <div className="w-full text-center text-sm text-gray-500 italic py-2">
+                                    「{searchTerm}」に一致するスタイルが見つかりません
                                 </div>
-                            ))}
+                            )}
                         </div>
                     </div>
                 )}

@@ -150,10 +150,13 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
     };
 
     return (
-        <div className="relative w-full max-w-4xl mx-auto bg-black rounded-lg overflow-hidden shadow-xl group">
+        <div
+            className={`relative mx-auto bg-black rounded-lg overflow-hidden shadow-xl group transition-all duration-300 ${isVertical ? 'aspect-[9/16] max-h-[75vh] w-auto' : 'aspect-video w-full max-w-4xl'
+                }`}
+        >
             <video
                 ref={videoRef}
-                className={`w-full ${isVertical ? 'aspect-[9/16] max-h-[75vh] object-contain bg-black' : 'aspect-video'}`}
+                className="w-full h-full object-contain bg-black"
                 controls
                 crossOrigin="anonymous"
                 onTimeUpdate={handleTimeUpdate}

@@ -693,12 +693,22 @@ async def analyze_video(request: AnalyzeRequest):
         current_start = 0
         current_end = 0
         in_cue = False
-        prev_line_was_empty = True  # Track empty lines to identify cue numbers
+        text_lines = []
+        prev_line_was_empty = True
 
         for i, line in enumerate(lines):
             stripped = line.strip()
 
             if "-->" in stripped:
+                # Save previous cue if any
+                if in_cue and text_lines:
+                    segments.append({
+                        "start": current_start,
+                        "end": current_end,
+                        "text": "\n".join(text_lines).strip()
+                    })
+                    text_lines = []
+
                 times = stripped.split(" --> ")
 
                 def parse_time(t):
@@ -714,21 +724,30 @@ async def analyze_video(request: AnalyzeRequest):
                 current_end = parse_time(times[1])
                 in_cue = True
             elif stripped and in_cue and "WEBVTT" not in stripped:
-                # Skip cue numbers (single digit/number on a line right after empty line)
+                # Skip cue numbers
                 if prev_line_was_empty and stripped.isdigit() and len(stripped) <= 6:
-                    # Likely a cue number, skip it
                     pass
                 else:
-                    # This is actual subtitle text
+                    text_lines.append(stripped)
+            elif not stripped:
+                if in_cue and text_lines:
                     segments.append({
                         "start": current_start,
                         "end": current_end,
-                        "text": stripped
+                        "text": "\n".join(text_lines).strip()
                     })
-            elif not stripped:
+                    text_lines = []
                 in_cue = False
 
             prev_line_was_empty = not stripped
+
+        # Add last segment
+        if in_cue and text_lines:
+            segments.append({
+                "start": current_start,
+                "end": current_end,
+                "text": "\n".join(text_lines).strip()
+            })
 
         total_segments = len(segments)
         offset = request.offset

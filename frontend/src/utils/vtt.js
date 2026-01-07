@@ -9,12 +9,20 @@ export function parseVTT(vttContent) {
     // 00:00:00.000 --> 00:00:05.000
     // Text content
 
+    let textLines = [];
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
 
-        if (line === 'WEBVTT' || line === '') continue;
+        if (line === 'WEBVTT') continue;
 
         if (line.includes('-->')) {
+            // Save previous subtitle if it existed
+            if (currentSubtitle && textLines.length > 0) {
+                currentSubtitle.text = textLines.join('\n');
+                subtitles.push(currentSubtitle);
+            }
+
             const [start, end] = line.split('-->').map(t => t.trim());
             currentSubtitle = {
                 id: generateUUID(),
@@ -22,11 +30,28 @@ export function parseVTT(vttContent) {
                 end: parseTimestamp(end),
                 text: ''
             };
+            textLines = [];
+        } else if (line === '') {
+            // Blank line indicates end of current cue text
+            if (currentSubtitle && textLines.length > 0) {
+                currentSubtitle.text = textLines.join('\n');
+                subtitles.push(currentSubtitle);
+                currentSubtitle = null;
+                textLines = [];
+            }
         } else if (currentSubtitle) {
-            currentSubtitle.text = line;
-            subtitles.push(currentSubtitle);
-            currentSubtitle = null;
+            // Only skip cue numbers (integers on their own line)
+            if (/^\d+$/.test(line) && i > 0 && lines[i - 1].trim() === '') {
+                continue;
+            }
+            textLines.push(lines[i]); // Keep original spacing if needed, or trim
         }
+    }
+
+    // Don't forget the last subtitle
+    if (currentSubtitle && textLines.length > 0) {
+        currentSubtitle.text = textLines.join('\n');
+        subtitles.push(currentSubtitle);
     }
 
     return subtitles;

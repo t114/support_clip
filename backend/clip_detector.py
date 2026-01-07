@@ -990,12 +990,27 @@ def detect_kusa_emoji_clips(comments_path: str, video_duration: float, clip_dura
                                         runs = message_data.get('runs', [])
                                         for run in runs:
                                             # Text emoji like :*kusa*:
-                                            if 'text' in run and ':' in run['text']:
+                                            if 'text' in run:
                                                 text = run['text']
                                                 # Count kusa patterns
                                                 kusa_count += text.count(':*kusa*:')
                                                 kusa_count += text.count(':kusa:')
                                                 kusa_count += text.count('草')
+                                                
+                                                # Count "w" patterns (wwww, WWWW, etc.)
+                                                # Only count sequences of 3+ w's to avoid false positives
+                                                import re
+                                                w_matches = re.findall(r'[wWｗＷ]{3,}', text)
+                                                kusa_count += len(w_matches)
+                                                
+                                                # Count other kusa variations
+                                                kusa_count += text.count('草生える')
+                                                kusa_count += text.count('草生えた')
+                                                kusa_count += text.count('大草原')
+                                                kusa_count += text.count('草不可避')
+                                                kusa_count += text.count('くさ')
+                                                kusa_count += text.count('クサ')
+                                                kusa_count += text.count('ｸｻ')
 
                                             # Emoji object (member stamps)
                                             if 'emoji' in run:
@@ -1051,6 +1066,21 @@ def detect_kusa_emoji_clips(comments_path: str, video_duration: float, clip_dura
                 # Search for kusa in text
                 text = c.get('text', '')
                 kusa_count = text.count(':*kusa*:') + text.count(':kusa:') + text.count('草')
+                
+                # Count "w" patterns (wwww, WWWW, etc.)
+                # Only count sequences of 3+ w's to avoid false positives
+                import re
+                w_matches = re.findall(r'[wWｗＷ]{3,}', text)
+                kusa_count += len(w_matches)
+                
+                # Count other kusa variations
+                kusa_count += text.count('草生える')
+                kusa_count += text.count('草生えた')
+                kusa_count += text.count('大草原')
+                kusa_count += text.count('草不可避')
+                kusa_count += text.count('くさ')
+                kusa_count += text.count('クサ')
+                kusa_count += text.count('ｸｻ')
 
                 if kusa_count > 0:
                     kusa_events.append((timestamp, kusa_count))

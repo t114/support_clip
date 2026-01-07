@@ -1,13 +1,160 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { generateUUID } from '../utils/vtt';
 
-export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTime, onSeek, onPause, savedStyles }) {
+// Searchable Style Dropdown Component
+function StyleDropdown({ savedStyles, currentStyle, onStyleChange, recentStyleNames, onStyleUsed, isOpen, onToggle, onClose }) {
+    const [searchTerm, setSearchTerm] = useState('');
+    const dropdownRef = useRef(null);
+
+    // Filter styles based on search term
+    const filteredStyles = Object.keys(savedStyles).filter(name =>
+        name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    // Get recent styles that actually still exist
+    const validRecentStyles = (recentStyleNames || []).filter(name => savedStyles[name]);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        function handleClickOutside(event) {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                onClose();
+                setSearchTerm('');
+            }
+        }
+
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [isOpen, onClose]);
+
+    const handleStyleSelect = (styleName) => {
+        onStyleChange(styleName);
+        if (styleName) onStyleUsed(styleName);
+        onClose();
+        setSearchTerm('');
+    };
+
+    return (
+        <div ref={dropdownRef} className="relative" onClick={(e) => e.stopPropagation()}>
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onToggle();
+                }}
+                className="text-xs border border-gray-300 rounded px-2 py-1 mr-2 bg-white hover:bg-gray-50 max-w-[120px] truncate"
+                title={currentStyle || 'デフォルト'}
+            >
+                {currentStyle || 'デフォルト'}
+            </button>
+
+            {isOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-300 rounded shadow-lg z-50 w-64">
+                    <div className="p-2 border-b">
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="スタイルを検索..."
+                            className="w-full text-xs border border-gray-300 rounded px-2 py-1"
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                    </div>
+                    <div className="max-h-60 overflow-y-auto">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleStyleSelect('');
+                            }}
+                            className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 ${!currentStyle ? 'bg-blue-100 font-semibold' : ''
+                                }`}
+                        >
+                            デフォルト
+                        </button>
+
+                        {/* Recent Styles Section */}
+                        {!searchTerm && validRecentStyles.length > 0 && (
+                            <div className="border-t border-b bg-gray-50">
+                                <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">最近使用したスタイル</div>
+                                {validRecentStyles.map(name => (
+                                    <button
+                                        key={`recent-${name}`}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleStyleSelect(name);
+                                        }}
+                                        className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 ${currentStyle === name ? 'bg-blue-100 font-semibold' : ''
+                                            }`}
+                                    >
+                                        {name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        {filteredStyles.length > 0 ? (
+                            <>
+                                {!searchTerm && <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b">すべてのスタイル</div>}
+                                {filteredStyles.map(name => (
+                                    <button
+                                        key={name}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleStyleSelect(name);
+                                        }}
+                                        className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 ${currentStyle === name ? 'bg-blue-100 font-semibold' : ''
+                                            }`}
+                                    >
+                                        {name}
+                                    </button>
+                                ))}
+                            </>
+                        ) : (
+                            <div className="px-3 py-2 text-xs text-gray-500 italic">
+                                スタイルが見つかりません
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTime, onSeek, onPause, savedStyles, recentStyleNames, onStyleUsed }) {
     const activeIndex = subtitles.findIndex(
         sub => currentTime >= sub.start && currentTime <= sub.end
     );
 
     const itemRefs = useRef({});
     const listRef = useRef(null);
+    const [styleSearchTerm, setStyleSearchTerm] = useState('');
+    const [openStyleDropdown, setOpenStyleDropdown] = useState(null);
+    const [maxChars, setMaxChars] = useState(15);
+    const [autoWrap, setAutoWrap] = useState(false);
+
+    // Helper to wrap text based on character count
+    const wrapText = (text, limit) => {
+        if (!text || limit <= 0) return text;
+
+        // Remove existing manual line breaks first to re-wrap properly
+        const cleanText = text.replace(/\n/g, '');
+        const lines = [];
+        for (let i = 0; i < cleanText.length; i += limit) {
+            lines.push(cleanText.substring(i, i + limit));
+        }
+        return lines.join('\n');
+    };
+
+    const handleApplyAutoWrap = () => {
+        const newSubtitles = subtitles.map(sub => ({
+            ...sub,
+            text: wrapText(sub.text, maxChars)
+        }));
+        onSubtitlesChange(newSubtitles);
+    };
 
     useEffect(() => {
         // Don't scroll if the user is currently editing (focus is ANYWHERE inside the list)
@@ -29,8 +176,13 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
     };
 
     const handleChange = (index, field, value) => {
+        let finalValue = value;
+        if (field === 'text' && autoWrap) {
+            finalValue = wrapText(value, maxChars);
+        }
+
         const newSubtitles = [...subtitles];
-        newSubtitles[index] = { ...newSubtitles[index], [field]: value };
+        newSubtitles[index] = { ...newSubtitles[index], [field]: finalValue };
         onSubtitlesChange(newSubtitles);
     };
 
@@ -69,14 +221,47 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
 
     return (
         <div className="bg-white rounded-lg shadow flex flex-col h-[600px]">
-            <div className="p-4 border-b flex justify-between items-center">
-                <h3 className="font-bold text-gray-700">字幕編集</h3>
-                <button
-                    onClick={() => handleAdd(subtitles.length - 1)}
-                    className="text-sm bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
-                >
-                    ＋ 最後に追加
-                </button>
+            <div className="p-4 border-b flex flex-col space-y-3">
+                <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-gray-700">字幕編集</h3>
+                    <button
+                        onClick={() => handleAdd(subtitles.length - 1)}
+                        className="text-sm bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
+                    >
+                        ＋ 最後に追加
+                    </button>
+                </div>
+
+                {/* Auto Line Break Settings */}
+                <div className="flex items-center space-x-4 bg-gray-50 p-2 rounded border border-gray-100">
+                    <div className="flex items-center space-x-2">
+                        <label className="text-xs font-medium text-gray-600">自動改行:</label>
+                        <input
+                            type="number"
+                            value={maxChars}
+                            onChange={(e) => setMaxChars(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-12 text-xs border rounded px-1 py-0.5"
+                            min="1"
+                        />
+                        <span className="text-xs text-gray-500">文字</span>
+                    </div>
+                    <label className="flex items-center space-x-1 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={autoWrap}
+                            onChange={(e) => setAutoWrap(e.target.checked)}
+                            className="rounded text-blue-500"
+                        />
+                        <span className="text-xs text-gray-600">入力時に適用</span>
+                    </label>
+                    <button
+                        onClick={handleApplyAutoWrap}
+                        className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded transition-colors"
+                        title="現在の全字幕に指定文字数で改行を入れます"
+                    >
+                        全字幕に適用
+                    </button>
+                </div>
             </div>
             <div
                 ref={listRef}
@@ -123,17 +308,16 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                         <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity items-center">
                             {/* Style Selector */}
                             {savedStyles && Object.keys(savedStyles).length > 0 && (
-                                <select
-                                    value={sub.styleName || ''}
-                                    onChange={(e) => handleChange(index, 'styleName', e.target.value)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="text-xs border border-gray-300 rounded px-1 py-0.5 mr-2 max-w-[100px]"
-                                >
-                                    <option value="">デフォルト</option>
-                                    {Object.keys(savedStyles).map(name => (
-                                        <option key={name} value={name}>{name}</option>
-                                    ))}
-                                </select>
+                                <StyleDropdown
+                                    savedStyles={savedStyles}
+                                    currentStyle={sub.styleName || ''}
+                                    onStyleChange={(styleName) => handleChange(index, 'styleName', styleName)}
+                                    recentStyleNames={recentStyleNames}
+                                    onStyleUsed={onStyleUsed}
+                                    isOpen={openStyleDropdown === index}
+                                    onToggle={() => setOpenStyleDropdown(openStyleDropdown === index ? null : index)}
+                                    onClose={() => setOpenStyleDropdown(null)}
+                                />
                             )}
 
                             <button

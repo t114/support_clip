@@ -32,6 +32,7 @@ function App() {
   // Saved Styles State
   const [savedStyles, setSavedStyles] = useState({});
   const [defaultStyleName, setDefaultStyleName] = useState('');
+  const [recentStyleNames, setRecentStyleNames] = useState([]);
 
   // Load saved styles from localStorage on mount
   useEffect(() => {
@@ -47,6 +48,14 @@ function App() {
     if (defaultName) {
       setDefaultStyleName(defaultName);
     }
+    const recent = localStorage.getItem('recentStyleNames');
+    if (recent) {
+      try {
+        setRecentStyleNames(JSON.parse(recent));
+      } catch (e) {
+        console.error('Failed to parse recent style names', e);
+      }
+    }
   }, []);
 
   const handleSaveStyle = (name, styleObj) => {
@@ -58,7 +67,18 @@ function App() {
   const handleLoadStyle = (name) => {
     if (savedStyles[name]) {
       setStyles(savedStyles[name]);
+      handleStyleUsed(name);
     }
+  };
+
+  const handleStyleUsed = (name) => {
+    if (!name) return;
+    setRecentStyleNames(prev => {
+      const filtered = prev.filter(n => n !== name);
+      const updated = [name, ...filtered].slice(0, 5); // Keep top 5
+      localStorage.setItem('recentStyleNames', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const handleDeleteStyle = (name) => {
@@ -66,6 +86,14 @@ function App() {
     delete newSavedStyles[name];
     setSavedStyles(newSavedStyles);
     localStorage.setItem('savedStyles', JSON.stringify(newSavedStyles));
+
+    // Remove from recent history
+    setRecentStyleNames(prev => {
+      const updated = prev.filter(n => n !== name);
+      localStorage.setItem('recentStyleNames', JSON.stringify(updated));
+      return updated;
+    });
+
     // Clear default if deleted
     if (defaultStyleName === name) {
       setDefaultStyleName('');
@@ -335,6 +363,7 @@ function App() {
                     onDelete={handleDeleteStyle}
                     defaultStyleName={defaultStyleName}
                     onSetDefault={handleSetDefaultStyle}
+                    onStyleUsed={handleStyleUsed}
                   />
 
                   <div className="text-center pt-4 flex justify-center space-x-4 flex-wrap gap-y-2">
@@ -464,6 +493,8 @@ function App() {
                         if (video) video.currentTime = time;
                       }}
                       savedStyles={savedStyles}
+                      recentStyleNames={recentStyleNames}
+                      onStyleUsed={handleStyleUsed}
                     />
                   )}
                 </div>
