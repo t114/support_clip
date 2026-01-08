@@ -12,6 +12,7 @@ from .video_clipper import extract_clip, merge_clips
 from .config import DEFAULT_MAX_CLIPS
 from .fcpxml_generator import generate_fcpxml
 from .video_processing import get_video_info
+from .description_generator import MEMBERS_FILE
 
 app = FastAPI()
 
@@ -126,8 +127,59 @@ class BurnRequest(BaseModel):
     with_danmaku: bool = False
     danmaku_density: int = 10
 
+def get_channel_info(cid, members_map=None):
+    if members_map is None:
+        members_map = {}
+        try:
+            with open(MEMBERS_FILE, "r", encoding='utf-8') as f:
+                data = json.load(f)
+                for m in data.get("members", []):
+                    url = m.get("channel_url", "")
+                    if "/channel/" in url:
+                        c_id = url.split("/channel/")[-1]
+                        members_map[c_id] = m.get("name_ja")
+        except: pass
+
+    name = cid
+    registered_at = None
+    
+    # 1. Check local channel_info.json (saved during sync)
+    c_dir = os.path.join(EMOJIS_DIR, cid)
+    info_path = os.path.join(c_dir, "channel_info.json")
+    if os.path.exists(info_path):
+        try:
+            with open(info_path, "r", encoding='utf-8') as f:
+                data = json.load(f)
+                name = data.get("name", cid)
+                registered_at = data.get("registered_at")
+        except: pass
+
+    # Fallback for registration date: use folder modification time
+    if not registered_at and os.path.exists(c_dir):
+        import datetime
+        mtime = os.path.getmtime(c_dir)
+        registered_at = datetime.datetime.fromtimestamp(mtime).isoformat()
+
+    if cid in members_map: 
+        name = members_map[cid]
+
+    # 2. Search info files in uploads if name is still unknown
+    if name == cid or name == "Unknown Channel":
+        import glob
+        for info_file in glob.glob(os.path.join(UPLOAD_DIR, "*.info.json")):
+            try:
+                with open(info_file, "r") as f:
+                    d = json.load(f)
+                    if d.get("channel_id") == cid:
+                        name = d.get("uploader")
+                        break
+            except: continue
+    
+    return name if name != cid else "Unknown Channel", registered_at
+
 class SyncEmojiRequest(BaseModel):
     channel_id: str
+    channel_name: Optional[str] = None
     emojis: Dict[str, str] # shortcut -> url
 
 def extract_text_from_runs(runs, collected_emojis=None):
@@ -339,51 +391,177 @@ async def sync_emojis(request: SyncEmojiRequest):
         if not channel_id or channel_id == "UNKNOWN_CHANNEL":
              raise HTTPException(status_code=400, detail="Channel ID is required")
              
+        # Reuse existing save logic if possible, or keep this explicit
+        # We'll use the helper function logic directly here for clarity as save_emojis_to_disk is designed slightly differently
+        
         channel_dir = os.path.join(EMOJIS_DIR, channel_id)
+        
+        # Overwrite logic: if directory exists, delete it first to ensure stale emojis are removed
+        if os.path.exists(channel_dir):
+            logger.info(f"Overwriting emojis for {channel_id}: removing existing directory")
+            shutil.rmtree(channel_dir)
+            
         os.makedirs(channel_dir, exist_ok=True)
         
         saved_count = 0
+        local_mapping = {}
+        
+        # Determine mapping file path
+        mapping_file = os.path.join(channel_dir, "map.json")
+        
+        # Load existing map to merge if needed, though usually we overwrite or update
+        # This block is removed because we are explicitly overwriting the directory
+        # if os.path.exists(mapping_file):
+        #     try:
+        #         with open(mapping_file, 'r', encoding='utf-8') as f:
+        #             local_mapping = json.load(f)
+        #     except: pass
+
         for shortcut, url in request.emojis.items():
             # Sanitize shortcut to use as filename
             safe_name = "".join([c for c in shortcut if c.isalnum() or c in "_-"]).strip("_")
             if not safe_name: safe_name = f"emoji_{hash(shortcut)}"
             
-            # Identify extension from URL if possible, otherwise .png
+            # Identify extension
             ext = ".png"
             if ".webp" in url: ext = ".webp"
             elif ".gif" in url: ext = ".gif"
             
-            file_path = os.path.join(channel_dir, f"{safe_name}{ext}")
+            filename = f"{safe_name}{ext}"
+            file_path = os.path.join(channel_dir, filename)
+            
+            # Update mapping
+            local_mapping[shortcut] = filename
             
             # Download if not exists
             if not os.path.exists(file_path):
                 logger.info(f"Downloading emoji {shortcut} for {channel_id}")
-                resp = requests.get(url, stream=True)
-                if resp.status_code == 200:
-                    with open(file_path, 'wb') as f:
-                        for chunk in resp.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                    saved_count += 1
+                try:
+                    resp = requests.get(url, stream=True, timeout=10)
+                    if resp.status_code == 200:
+                        with open(file_path, 'wb') as f:
+                            for chunk in resp.iter_content(chunk_size=8192):
+                                f.write(chunk)
+                        saved_count += 1
+                except Exception as e:
+                     logger.warning(f"Failed to download emoji {shortcut}: {e}")
             else:
                 saved_count += 1
                 
-        # Also save a mapping file for the frontend to know which extension to use
-        mapping_file = os.path.join(channel_dir, "map.json")
+        # Save mapping file
         with open(mapping_file, 'w', encoding='utf-8') as f:
-            # We store the local filename (basename) for each shortcut
-            local_mapping = {}
-            for shortcut, url in request.emojis.items():
-                 safe_name = "".join([c for c in shortcut if c.isalnum() or c in "_-"]).strip("_")
-                 if not safe_name: safe_name = f"emoji_{hash(shortcut)}"
-                 ext = ".png"
-                 if ".webp" in url: ext = ".webp"
-                 elif ".gif" in url: ext = ".gif"
-                 local_mapping[shortcut] = f"{safe_name}{ext}"
             json.dump(local_mapping, f, ensure_ascii=False, indent=2)
+
+        # Save channel name metadata if provided
+        if request.channel_name:
+            import datetime
+            info_file = os.path.join(channel_dir, "channel_info.json")
+            info_data = {"name": request.channel_name, "registered_at": datetime.datetime.now().isoformat()}
+            with open(info_file, 'w', encoding='utf-8') as f:
+                json.dump(info_data, f, ensure_ascii=False, indent=2)
 
         return {"status": "success", "saved_count": saved_count, "channel_id": channel_id}
     except Exception as e:
         logger.error(f"Error syncing emojis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/emojis")
+async def list_emojis():
+    """List all channels and their emoji stats"""
+    import glob
+    
+    # Load members data to map channel IDs to names
+    members_map = {}
+    try:
+        with open(MEMBERS_FILE, "r", encoding='utf-8') as f:
+            data = json.load(f)
+            for m in data.get("members", []):
+                # Try to extract ID from URL if possible, or just use name match if we had ID
+                # Since we don't have ID in members.json easily, we might need to rely on 'name_ja'
+                # But actually, let's just use what we have.
+                # We can try to guess from channel_url if it is standard
+                url = m.get("channel_url", "")
+                if "/channel/" in url:
+                    cid = url.split("/channel/")[-1]
+                    members_map[cid] = m.get("name_ja")
+                elif "/@" in url:
+                    # Handle handle URLs? We can't easily map handles to IDs without API
+                    pass
+    except: pass
+    
+    results = []
+    if os.path.exists(EMOJIS_DIR):
+        for cid in os.listdir(EMOJIS_DIR):
+            c_dir = os.path.join(EMOJIS_DIR, cid)
+            if not os.path.isdir(c_dir): continue
+            
+            map_file = os.path.join(c_dir, "map.json")
+            count = 0
+            mapping_file = os.path.join(c_dir, "map.json")
+            if not os.path.exists(mapping_file): continue
+            
+            try:
+                with open(mapping_file, "r", encoding='utf-8') as f:
+                    emojis = json.load(f)
+                    name, registered_at = get_channel_info(cid, members_map)
+                    results.append({
+                        "id": cid,
+                        "name": name,
+                        "registered_at": registered_at,
+                        "count": len(emojis),
+                        "examples": list(emojis.keys())[:5]
+                    })
+            except: continue
+    
+    results.sort(key=lambda x: x["count"], reverse=True)
+    return {"channels": results}
+
+@app.get("/api/emojis/{channel_id}")
+async def get_emoji_details(channel_id: str):
+    """Get all emoji details for a specific channel"""
+    channel_dir = os.path.join(EMOJIS_DIR, channel_id)
+    if not os.path.exists(channel_dir):
+        raise HTTPException(status_code=404, detail="Channel not found")
+        
+    mapping_file = os.path.join(channel_dir, "map.json")
+    if not os.path.exists(mapping_file):
+        return {"id": channel_id, "emojis": []}
+        
+    try:
+        with open(mapping_file, "r", encoding='utf-8') as f:
+            emojis = json.load(f)
+            
+        # Build full URLs for frontend
+        detail_list = []
+        for shortcut, filename in emojis.items():
+            detail_list.append({
+                "shortcut": shortcut,
+                "url": f"/static/emojis/{channel_id}/{filename}"
+            })
+            
+        name, registered_at = get_channel_info(channel_id)
+        return {
+            "id": channel_id,
+            "name": name,
+            "registered_at": registered_at,
+            "emojis": detail_list
+        }
+    except Exception as e:
+        logger.error(f"Error reading emoji details for {channel_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/emojis/{channel_id}")
+async def delete_emojis(channel_id: str):
+    """Delete all emojis for a channel"""
+    try:
+        channel_dir = os.path.join(EMOJIS_DIR, channel_id)
+        if not os.path.exists(channel_dir):
+            raise HTTPException(status_code=404, detail="Channel not found")
+            
+        shutil.rmtree(channel_dir)
+        return {"status": "success", "message": f"Deleted emojis for {channel_id}"}
+    except Exception as e:
+        logger.error(f"Error deleting emojis for {channel_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/burn")
