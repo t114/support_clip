@@ -59,6 +59,8 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            'noplaylist': True,
+            'playlist_items': '1',
         }
         
         print(f"Fetching video info for: {url}")
@@ -120,6 +122,8 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                             'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
                             'quiet': False,
                             'no_warnings': False,
+                            'noplaylist': True,
+                            'playlist_items': '1',
                         }
                         try:
                             with yt_dlp.YoutubeDL(ydl_opts_comments) as ydl_c:
@@ -157,6 +161,7 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
             'format': YOUTUBE_DOWNLOAD_FORMAT,
             'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
             'noplaylist': True,
+            'playlist_items': '1',
             'quiet': False,
             'no_warnings': False,
             'extract_flat': False,
@@ -222,6 +227,8 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                     'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
                     'quiet': False,
                     'no_warnings': False,
+                    'noplaylist': True,
+                    'playlist_items': '1',
                 }
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts_comments) as ydl_c:
