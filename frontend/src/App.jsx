@@ -4,6 +4,7 @@ import YouTubeClipCreator from './components/YouTubeClipCreator';
 import VideoPlayer from './components/VideoPlayer';
 import SubtitleEditor from './components/SubtitleEditor';
 import StyleEditor from './components/StyleEditor';
+import EmojiManager from './components/EmojiManager';
 import { parseVTT, stringifyVTT, stringifySRT } from './utils/vtt';
 
 function App() {
@@ -11,7 +12,7 @@ function App() {
   const [videoData, setVideoData] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [progressMessage, setProgressMessage] = useState('');
-  const [mode, setMode] = useState('upload'); // 'upload' or 'youtube'
+  const [mode, setMode] = useState('upload'); // 'upload', 'youtube', 'emoji'
 
   // Subtitle State
   const [subtitles, setSubtitles] = useState([]);
@@ -302,9 +303,17 @@ function App() {
           >
             YouTube切り抜き
           </button>
+          <button
+            onClick={() => setMode('emoji')}
+            className={`px-4 py-2 rounded-md ${mode === 'emoji' ? 'bg-green-600 text-white' : 'bg-white text-gray-700 border'}`}
+          >
+            スタンプ管理
+          </button>
         </div>
 
-        {mode === 'youtube' ? (
+        {mode === 'emoji' ? (
+          <EmojiManager />
+        ) : mode === 'youtube' ? (
           <YouTubeClipCreator />
         ) : (
           <>

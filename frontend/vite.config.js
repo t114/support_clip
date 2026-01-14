@@ -19,6 +19,7 @@ export default defineConfig({
       '/generate-description': 'http://127.0.0.1:8000',
       '/generate-twitter-pr': 'http://127.0.0.1:8000',
       '/hololive-members': 'http://127.0.0.1:8000',
+      '/api': 'http://127.0.0.1:8000',
     },
   },
 })
