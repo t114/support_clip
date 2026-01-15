@@ -203,7 +203,8 @@ function App() {
             .filter(sub => sub.sound)
             .map(sub => ({
               name: sub.sound,
-              time: sub.start // Start of the subtitle
+              time: sub.start, // Start of the subtitle
+              volume: sub.soundVolume !== undefined ? sub.soundVolume : 1
             }))
         }),
       });

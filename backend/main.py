@@ -782,7 +782,8 @@ async def burn_subtitles(request: BurnRequest):
                 if se.get('name'):
                     processed_sounds.append({
                         'path': os.path.join(SOUNDS_DIR, se['name']),
-                        'time': float(se.get('time', 0))
+                        'time': float(se.get('time', 0)),
+                        'volume': float(se.get('volume', 1.0))
                     })
 
         # Burn subtitles (now with image prefix support and danmaku)

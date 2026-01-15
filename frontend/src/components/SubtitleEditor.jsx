@@ -146,6 +146,7 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                     const s = sounds.find(x => x.name === sub.sound);
                     if (s) {
                         const audio = new Audio(s.url);
+                        audio.volume = sub.soundVolume !== undefined ? sub.soundVolume : 1;
                         audio.play().catch(err => console.error("SE Playback error:", err));
                     }
                 }
@@ -355,20 +356,34 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                                     ))}
                                 </select>
                                 {sub.sound && (
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            const s = sounds.find(x => x.name === sub.sound);
-                                            if (s) {
-                                                const audio = new Audio(s.url);
-                                                audio.play();
-                                            }
-                                        }}
-                                        className="text-[10px] hover:scale-110 transition-transform"
-                                        title="プレビュー"
-                                    >
-                                        ▶️
-                                    </button>
+                                    <>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                            value={sub.soundVolume !== undefined ? sub.soundVolume : 1}
+                                            onChange={(e) => handleChange(index, 'soundVolume', parseFloat(e.target.value))}
+                                            className="w-12 h-1 accent-blue-500 cursor-pointer"
+                                            title={`音量: ${Math.round((sub.soundVolume !== undefined ? sub.soundVolume : 1) * 100)}%`}
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const s = sounds.find(x => x.name === sub.sound);
+                                                if (s) {
+                                                    const audio = new Audio(s.url);
+                                                    audio.volume = sub.soundVolume !== undefined ? sub.soundVolume : 1;
+                                                    audio.play();
+                                                }
+                                            }}
+                                            className="text-[10px] hover:scale-110 transition-transform"
+                                            title="プレビュー"
+                                        >
+                                            ▶️
+                                        </button>
+                                    </>
                                 )}
                             </div>
 

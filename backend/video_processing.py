@@ -168,7 +168,8 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
             delay_ms = int(se['time'] * 1000)
             # Input index for SE starts from 1 (0 is the video)
             se_input_idx = i + 1
-            audio_filter_parts.append(f"[{se_input_idx}:a]adelay={delay_ms}|{delay_ms}[se{i}]")
+            vol = se.get('volume', 1.0)
+            audio_filter_parts.append(f"[{se_input_idx}:a]adelay={delay_ms}|{delay_ms},volume={vol}[se{i}]")
         
         # Mix original audio [0:a] with all SEs
         se_labels = "".join([f"[se{i}]" for i in range(len(sound_events))])
