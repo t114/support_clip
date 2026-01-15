@@ -146,7 +146,7 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                     const s = sounds.find(x => x.name === sub.sound);
                     if (s) {
                         const audio = new Audio(s.url);
-                        audio.volume = sub.soundVolume !== undefined ? sub.soundVolume : 1;
+                        audio.volume = sub.soundVolume !== undefined ? sub.soundVolume : 0.5;
                         audio.play().catch(err => console.error("SE Playback error:", err));
                     }
                 }
@@ -362,10 +362,10 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                                             min="0"
                                             max="1"
                                             step="0.05"
-                                            value={sub.soundVolume !== undefined ? sub.soundVolume : 1}
+                                            value={sub.soundVolume !== undefined ? sub.soundVolume : 0.5}
                                             onChange={(e) => handleChange(index, 'soundVolume', parseFloat(e.target.value))}
                                             className="w-12 h-1 accent-blue-500 cursor-pointer"
-                                            title={`音量: ${Math.round((sub.soundVolume !== undefined ? sub.soundVolume : 1) * 100)}%`}
+                                            title={`音量: ${Math.round((sub.soundVolume !== undefined ? sub.soundVolume : 0.5) * 100)}%`}
                                             onClick={(e) => e.stopPropagation()}
                                         />
                                         <button
@@ -374,7 +374,7 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                                                 const s = sounds.find(x => x.name === sub.sound);
                                                 if (s) {
                                                     const audio = new Audio(s.url);
-                                                    audio.volume = sub.soundVolume !== undefined ? sub.soundVolume : 1;
+                                                    audio.volume = sub.soundVolume !== undefined ? sub.soundVolume : 0.5;
                                                     audio.play();
                                                 }
                                             }}

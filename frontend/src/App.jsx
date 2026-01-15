@@ -204,7 +204,7 @@ function App() {
             .map(sub => ({
               name: sub.sound,
               time: sub.start, // Start of the subtitle
-              volume: sub.soundVolume !== undefined ? sub.soundVolume : 1
+              volume: sub.soundVolume !== undefined ? sub.soundVolume : 0.5
             }))
         }),
       });
