@@ -1,7 +1,7 @@
 import subprocess
 import os
 
-def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None):
+def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None, sound_events: list = None):
     """
     Extracts a clip from the video using ffmpeg.
     crop_params: dict with keys 'x', 'y', 'width', 'height' (optional)
@@ -18,6 +18,19 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
         
         # Build inputs
         input_args = ["-ss", str(start), "-i", video_path]
+        
+        # Build audio inputs and filter
+        audio_filters = []
+        if sound_events:
+            for i, se in enumerate(sound_events):
+                input_args.extend(["-i", se['path']])
+                delay_ms = int(se['time'] * 1000)
+                # Input index for SE starts from 1 (0 is the video)
+                se_input_idx = i + 1
+                audio_filters.append(f"[{se_input_idx}:a]adelay={delay_ms}|{delay_ms}[se{i}]")
+            
+            se_labels = "".join([f"[se{i}]" for i in range(len(sound_events))])
+            audio_filters.append(f"[0:a]{se_labels}amix=inputs={1+len(sound_events)}:duration=first[out_a]")
         
         # Build filter chain
         filters = []
@@ -71,20 +84,21 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
             "-t", str(duration)
         ]
 
-        if filters:
+        if filters or audio_filters:
             # Join with semicolon for filter_complex
-            filter_str = ";".join(filters)
+            # Combine video and audio filters
+            all_filters = filters + audio_filters
+            filter_str = ";".join(all_filters)
             
             # Write filter_complex to file to avoid "Argument list too long"
             filter_script_path = f"{output_path}.filter_complex"
             with open(filter_script_path, "w", encoding="utf-8") as f:
                 f.write(filter_str)
-                
-            cmd.extend(["-filter_complex_script", filter_script_path, "-map", current_v, "-map", "0:a?"])
+            
+            cmd.extend(["-filter_complex_script", filter_script_path, "-map", current_v, "-map", "[out_a]" if sound_events else "0:a?"])
         else:
-            # If no filters, map 0:v (shouldn't happen with crop/scale checks but for safety)
-            # Actually if no filters, current_v is [0:v]
-            pass
+            # If no filters at all, map original streams
+            cmd.extend(["-map", "0:v", "-map", "0:a?"])
 
         cmd.extend([
             "-c:v", "libx264", # Re-encode to ensure accurate cutting and compatibility

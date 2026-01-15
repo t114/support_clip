@@ -35,7 +35,10 @@ function App() {
   const [defaultStyleName, setDefaultStyleName] = useState('');
   const [recentStyleNames, setRecentStyleNames] = useState([]);
 
-  // Load saved styles from localStorage on mount
+  // Sounds State
+  const [sounds, setSounds] = useState([]);
+
+  // Load saved styles and sounds from localStorage on mount
   useEffect(() => {
     const loaded = localStorage.getItem('savedStyles');
     if (loaded) {
@@ -57,6 +60,12 @@ function App() {
         console.error('Failed to parse recent style names', e);
       }
     }
+
+    // Fetch available sounds
+    fetch('/api/sounds')
+      .then(res => res.json())
+      .then(data => setSounds(data.sounds || []))
+      .catch(err => console.error('Failed to load sounds:', err));
   }, []);
 
   const handleSaveStyle = (name, styleObj) => {
@@ -189,7 +198,13 @@ function App() {
               acc[index] = sub.styleName;
             }
             return acc;
-          }, {})
+          }, {}),
+          sound_events: subtitles
+            .filter(sub => sub.sound)
+            .map(sub => ({
+              name: sub.sound,
+              time: sub.start // Start of the subtitle
+            }))
         }),
       });
 
@@ -504,6 +519,7 @@ function App() {
                       savedStyles={savedStyles}
                       recentStyleNames={recentStyleNames}
                       onStyleUsed={handleStyleUsed}
+                      sounds={sounds}
                     />
                   )}
                 </div>

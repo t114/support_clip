@@ -703,7 +703,11 @@ function ClipPreview({
                             削除
                         </button>
                         <button
-                            onClick={() => onCreate({ ...localClip, with_danmaku: showDanmaku, danmaku_density: danmakuDensity })}
+                            onClick={() => onCreate({
+                                ...localClip,
+                                with_danmaku: showDanmaku,
+                                danmaku_density: danmakuDensity
+                            })}
                             disabled={isCreating}
                             className={`px-3 py-1.5 text-white rounded text-sm font-medium ${isCreating
                                 ? 'bg-green-400 cursor-not-allowed'

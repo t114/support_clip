@@ -145,7 +145,8 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                         "start_time": extract_start_time_from_url(url),
                         "cached": True,
                         "comments_file": live_chat_file if os.path.exists(live_chat_file) else (comments_file if os.path.exists(comments_file) else None),
-                        "channel_id": info.get('channel_id')
+                        "channel_id": info.get('channel_id'),
+                        "upload_date": info.get('upload_date')
                     }
                 else:
                     # Not cached, but check for comments_file anyway later
@@ -258,7 +259,8 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                 "start_time": extract_start_time_from_url(url),
                 "cached": False,
                 "comments_file": final_comments_file,
-                "channel_id": info.get('channel_id')
+                "channel_id": info.get('channel_id'),
+                "upload_date": info.get('upload_date')
             }
 
     except yt_dlp.utils.DownloadError as e:

@@ -11,6 +11,7 @@ def generate_twitter_pr_text(
     original_url: str,
     clip_title: str = None,
     video_description: str = "",
+    upload_date: str = None,
 ) -> str:
     """
     Generate Twitter PR text for a Hololive clip using LLM (Ollama).

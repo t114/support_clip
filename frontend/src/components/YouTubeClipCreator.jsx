@@ -2,11 +2,10 @@ import React, { useState, useEffect } from 'react';
 import ClipPreview from './ClipPreview';
 import DescriptionModal from './DescriptionModal';
 import TwitterModal from './TwitterModal';
-import EmojiSyncModal from './EmojiSyncModal';
 
 function YouTubeClipCreator() {
     const [url, setUrl] = useState('');
-    const [modelSize, setModelSize] = useState('base');
+    const [modelSize, setModelSize] = useState('none');
     const [status, setStatus] = useState('idle'); // idle, downloading, analyzing, ready
     const [videoInfo, setVideoInfo] = useState(null);
     const [clips, setClips] = useState([]);
@@ -37,7 +36,11 @@ function YouTubeClipCreator() {
 
     // Comments for Danmaku Preview
     const [comments, setComments] = useState([]);
-    const [isEmojiModalOpen, setIsEmojiModalOpen] = useState(false);
+
+    // Frequent stamps for analysis
+    const [topStamps, setTopStamps] = useState([]);
+    const [isFetchingTopStamps, setIsFetchingTopStamps] = useState(false);
+    const [showTopStamps, setShowTopStamps] = useState(false);
 
     // Load comments when videoInfo is available and has comments
     useEffect(() => {
@@ -51,7 +54,9 @@ function YouTubeClipCreator() {
                 .then(data => {
                     if (data.comments) {
                         console.log(`Loaded ${data.comments.length} comments for preview`);
-                        setComments(data.comments);
+                        // Add unique IDs to comments to avoid key collisions in DanmakuLayer
+                        const commentsWithIds = data.comments.map((c, i) => ({ ...c, id: `comment-${i}` }));
+                        setComments(commentsWithIds);
                     } else {
                         console.warn('Comments API returned no comments array');
                     }
@@ -313,47 +318,70 @@ function YouTubeClipCreator() {
         }
     };
 
-    const analyzeKusaClips = async () => {
+    const handleAnalyzeStamps = async (category, customPattern = null) => {
         try {
             setStatus('analyzing');
-            setMessage('草絵文字を分析中...');
+            const catName = customPattern ? `スタンプ「${customPattern}」` : (category === 'kusa' ? '草' : 'カワイイ');
+            setMessage(`${catName}シーンを分析中...`);
 
-            const response = await fetch('/youtube/analyze-kusa', {
+            const response = await fetch('/youtube/analyze-stamps', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     vtt_filename: vttFilename,
                     video_filename: videoInfo?.filename,
+                    category: category,
+                    custom_patterns: customPattern ? [customPattern] : null,
                     clip_duration: 60
                 })
             });
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.detail || 'Kusa analysis failed');
+                throw new Error(errorData.detail || `${catName}分析に失敗しました`);
             }
 
             const data = await response.json();
 
             if (data.clips && data.clips.length > 0) {
-                // Add IDs to clips
                 const clipsWithIds = data.clips.map((c, i) => ({ ...c, id: Date.now() + i }));
-
-                // Replace existing clips with kusa clips
                 setClips(clipsWithIds);
-                setMessage(`草絵文字クリップが見つかりました (${data.total_clips}件)`);
+                setMessage(`${catName}盛り上がりシーンが見つかりました (${data.total_clips}件)`);
             } else {
-                setMessage(data.message || '草絵文字を含むクリップが見つかりませんでした');
+                setMessage(data.message || `${catName}シーンが見つかりませんでした`);
             }
 
             setStatus('ready');
-
         } catch (e) {
             console.error(e);
             setStatus('ready');
-            setMessage('草絵文字分析に失敗しました: ' + e.message);
+            setMessage(e.message);
         }
     };
+
+    const handleFetchTopStamps = async () => {
+        if (!videoInfo?.filename && !vttFilename) return;
+        setIsFetchingTopStamps(true);
+        try {
+            const res = await fetch('/youtube/top-stamps', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vtt_filename: vttFilename,
+                    video_filename: videoInfo?.filename
+                })
+            });
+            if (!res.ok) throw new Error('頻出スタンプの取得に失敗しました');
+            const data = await res.json();
+            setTopStamps(data.top_stamps || []);
+            setShowTopStamps(true);
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            setIsFetchingTopStamps(false);
+        }
+    };
+
 
     const analyzeCommentDensity = async () => {
         try {
@@ -430,7 +458,8 @@ function YouTubeClipCreator() {
                     original_url: url,
                     original_title: videoInfo.title || '',
                     video_description: videoInfo.description || '',
-                    clip_title: null
+                    clip_title: null,
+                    upload_date: videoInfo.upload_date || null
                 })
             });
 
@@ -464,7 +493,8 @@ function YouTubeClipCreator() {
                     original_url: url,
                     original_title: videoInfo.title || '',
                     video_description: videoInfo.description || '',
-                    clip_title: null
+                    clip_title: null,
+                    upload_date: videoInfo.upload_date || null
                 })
             });
 
@@ -668,15 +698,6 @@ function YouTubeClipCreator() {
                                     <span className={`text-xs px-2 py-0.5 rounded-full ${comments.length > 0 ? 'bg-green-100 text-green-700' : (videoInfo.has_comments ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}`}>
                                         コメント: {videoInfo.has_comments ? (comments.length > 0 ? `${comments.length}件 ✓` : '読み込み中...') : 'データなし ✗'}
                                     </span>
-                                    {videoInfo.has_comments && (
-                                        <button
-                                            onClick={() => setIsEmojiModalOpen(true)}
-                                            className="text-[10px] bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors flex items-center gap-1 font-bold"
-                                            title="メンバースタンプを同期"
-                                        >
-                                            スタンプ同期
-                                        </button>
-                                    )}
                                 </div>
                             )}
                         </div>
@@ -829,15 +850,73 @@ function YouTubeClipCreator() {
                                                 コメント量解析
                                             </button>
                                             <button
-                                                onClick={analyzeKusaClips}
-                                                className="px-6 py-3 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors flex items-center gap-2"
+                                                onClick={() => handleAnalyzeStamps('kusa')}
+                                                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
                                             >
                                                 <span className="text-xl">🌱</span>
-                                                草絵文字解析
+                                                草解析
+                                            </button>
+                                            <button
+                                                onClick={() => handleAnalyzeStamps('kawaii')}
+                                                className="px-6 py-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors flex items-center gap-2"
+                                            >
+                                                <span className="text-xl">💕</span>
+                                                カワイイ解析
+                                            </button>
+                                            <button
+                                                onClick={handleFetchTopStamps}
+                                                disabled={isFetchingTopStamps}
+                                                className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                                </svg>
+                                                {isFetchingTopStamps ? '集計中...' : '集計スタンプ解析'}
                                             </button>
                                         </>
                                     )}
                                 </div>
+
+                                {showTopStamps && topStamps.length > 0 && (
+                                    <div className="mt-6 border-t pt-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h5 className="font-bold text-indigo-900 flex items-center gap-1">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                                </svg>
+                                                頻出スタンプランキング (上位20件)
+                                            </h5>
+                                            <button onClick={() => setShowTopStamps(false)} className="text-gray-400 hover:text-gray-600">
+                                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {topStamps.map((s, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    onClick={() => handleAnalyzeStamps(null, s.shortcut)}
+                                                    className="group flex items-center gap-2 bg-white border border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 px-3 py-2 rounded-full shadow-sm transition-all"
+                                                    title={`${s.shortcut} で盛り上がり箇所を解析`}
+                                                >
+                                                    <span className="font-mono text-sm text-indigo-700">{s.shortcut}</span>
+                                                    <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.5 rounded-full font-bold group-hover:bg-indigo-200">
+                                                        {s.count}
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <p className="text-xs text-indigo-500 mt-3">
+                                            ※ スタンプをクリックすると、そのスタンプの使用密度に基づいた盛り上がり解析を実行します。
+                                        </p>
+                                    </div>
+                                )}
+                                {showTopStamps && topStamps.length === 0 && !isFetchingTopStamps && (
+                                    <p className="text-center text-sm text-gray-500 mt-4 italic">
+                                        スタンプの使用データが見つかりませんでした。
+                                    </p>
+                                )}
                                 {!videoInfo?.has_comments && (
                                     <p className="text-sm text-gray-600 mt-3 text-center">
                                         ※ コメント解析を使用するには、動画ダウンロード時に「コメント/チャットも取得」にチェックを入れてください
@@ -951,15 +1030,6 @@ function YouTubeClipCreator() {
                 isOpen={isTwitterModalOpen}
                 onClose={() => setIsTwitterModalOpen(false)}
                 initialText={twitterPrText}
-            />
-
-            <EmojiSyncModal
-                isOpen={isEmojiModalOpen}
-                onClose={() => setIsEmojiModalOpen(false)}
-                channelId={videoInfo?.channel_id}
-                onSyncComplete={(channelId) => {
-                    // Force refresh of emoji map if necessary
-                }}
             />
         </div>
     );

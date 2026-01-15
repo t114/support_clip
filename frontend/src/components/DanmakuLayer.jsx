@@ -87,7 +87,7 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
 
                 return (
                     <div
-                        key={`${comment.timestamp}-${comment.text}`}
+                        key={comment.id || `${comment.timestamp}-${comment.text}`}
                         className="absolute whitespace-nowrap text-white font-bold pointer-events-none"
                         style={{
                             top: `${topPercent}%`,

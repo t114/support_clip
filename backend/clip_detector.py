@@ -930,213 +930,143 @@ def count_comments_in_clips(clips: list, comments_path: str) -> list:
         traceback.print_exc()
         return clips
 
-def detect_kusa_emoji_clips(comments_path: str, video_duration: float, clip_duration: int = 60) -> list:
+def detect_emoji_density_clips(comments_path: str, video_duration: float, category: str = "kusa", custom_patterns: list = None, clip_duration: int = 60) -> list:
     """
-    Detects clips based on kusa emoji (:*kusa*:) frequency in comments.
-    Analyzes 1-minute windows and returns top 10 clips with highest kusa emoji usage.
-
+    Detects clips based on specific emoji/pattern density in comments.
+    
     Args:
-        comments_path: Path to the live_chat.json or info.json file
-        video_duration: Total video duration in seconds
-        clip_duration: Duration of each clip window in seconds (default: 60)
-
-    Returns:
-        List of top 10 clips sorted by kusa emoji frequency
+        comments_path: Path to comments file
+        video_duration: Video duration
+        category: "kusa", "kawaii", etc.
+        custom_patterns: List of custom stamp shortcuts to count
+        clip_duration: Window size
     """
     try:
         if not os.path.exists(comments_path):
-            print(f"Comments file not found: {comments_path}")
             return []
 
-        print(f"[KUSA_DETECTOR] Analyzing kusa emojis from {comments_path}...")
+        print(f"[STAMP_DETECTOR] Analyzing {category} intensity from {comments_path}...")
+        events = []
+        
+        # Default patterns based on category
+        patterns = []
+        regex_patterns = []
+        
+        if category == "kusa":
+            patterns = [':*kusa*:', ':kusa:', '草', '草生える', '草生えた', '大草原', '草不可避', 'くさ', 'クサ', 'ｸｻ']
+            regex_patterns = [r'[wWｗＷ]{3,}']
+        elif category == "kawaii":
+            patterns = ['かわいい', 'カワイイ', '可愛い', 'kawaii', 'Kawaii', 'てぇてぇ', '助かる', 'たすかる', '天使']
+        
+        if custom_patterns:
+            # shortcuts might be provided without colons in config, but chat has colons
+            for p in custom_patterns:
+                patterns.append(p)
+                if not p.startswith(':'):
+                    patterns.append(f":{p}:")
 
-        kusa_events = []  # List of (timestamp, count) tuples
-
-        # Check if it's a live chat file (NDJSON)
+        # Parsing logic (generalized)
         if comments_path.endswith('.live_chat.json'):
-            print("[KUSA_DETECTOR] Parsing live chat data (NDJSON)...")
             with open(comments_path, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f):
-                    if not line.strip():
-                        continue
+                for line in f:
+                    if not line.strip(): continue
                     try:
                         data = json.loads(line)
-
-                        # Extract timestamp and message
-                        if 'replayChatItemAction' in data:
-                            action = data['replayChatItemAction']
-
-                            # Get timestamp
-                            if 'videoOffsetTimeMsec' not in action:
-                                continue
-                            timestamp = int(action['videoOffsetTimeMsec']) / 1000.0
-
-                            # Search for kusa emoji in message
-                            kusa_count = 0
-
-                            # Navigate to the actual message content
-                            actions = action.get('actions', [])
-                            for act in actions:
-                                # Check for addChatItemAction
-                                if 'addChatItemAction' in act:
-                                    item = act['addChatItemAction'].get('item', {})
-
-                                    # Check liveChatTextMessageRenderer
-                                    if 'liveChatTextMessageRenderer' in item:
-                                        renderer = item['liveChatTextMessageRenderer']
-                                        message_data = renderer.get('message', {})
-
-                                        # Check runs for emoji
-                                        runs = message_data.get('runs', [])
-                                        for run in runs:
-                                            # Text emoji like :*kusa*:
-                                            if 'text' in run:
-                                                text = run['text']
-                                                # Count kusa patterns
-                                                kusa_count += text.count(':*kusa*:')
-                                                kusa_count += text.count(':kusa:')
-                                                kusa_count += text.count('草')
-                                                
-                                                # Count "w" patterns (wwww, WWWW, etc.)
-                                                # Only count sequences of 3+ w's to avoid false positives
+                        if 'replayChatItemAction' not in data: continue
+                        action = data['replayChatItemAction']
+                        if 'videoOffsetTimeMsec' not in action: continue
+                        timestamp = int(action['videoOffsetTimeMsec']) / 1000.0
+                        
+                        count = 0
+                        actions = action.get('actions', [])
+                        for act in actions:
+                            if 'addChatItemAction' in act:
+                                item = act['addChatItemAction'].get('item', {})
+                                if 'liveChatTextMessageRenderer' in item:
+                                    message_data = item['liveChatTextMessageRenderer'].get('message', {})
+                                    runs = message_data.get('runs', [])
+                                    for run in runs:
+                                        if 'text' in run:
+                                            text = run['text']
+                                            for p in patterns:
+                                                count += text.count(p)
+                                            for rp in regex_patterns:
                                                 import re
-                                                w_matches = re.findall(r'[wWｗＷ]{3,}', text)
-                                                kusa_count += len(w_matches)
-                                                
-                                                # Count other kusa variations
-                                                kusa_count += text.count('草生える')
-                                                kusa_count += text.count('草生えた')
-                                                kusa_count += text.count('大草原')
-                                                kusa_count += text.count('草不可避')
-                                                kusa_count += text.count('くさ')
-                                                kusa_count += text.count('クサ')
-                                                kusa_count += text.count('ｸｻ')
-
-                                            # Emoji object (member stamps)
-                                            if 'emoji' in run:
-                                                emoji = run['emoji']
-                                                is_kusa = False
-
-                                                # Check shortcuts array (e.g., [":_mikoKusa:", ":mikoKusa:", ":_kusa:", ":kusa:"])
-                                                shortcuts = emoji.get('shortcuts', [])
-                                                for shortcut in shortcuts:
-                                                    if 'kusa' in shortcut.lower():
-                                                        is_kusa = True
-                                                        break
-
-                                                # Also check searchTerms as fallback (if shortcuts is empty or didn't match)
-                                                if not is_kusa:
-                                                    search_terms = emoji.get('searchTerms', [])
-                                                    for term in search_terms:
-                                                        if 'kusa' in term.lower():
-                                                            is_kusa = True
-                                                            break
-
-                                                if is_kusa:
-                                                    kusa_count += 1
-
-                            if kusa_count > 0:
-                                kusa_events.append((timestamp, kusa_count))
-
-                    except Exception as e:
-                        if line_num < 10:  # Only log first 10 errors
-                            print(f"[KUSA_DETECTOR] Error parsing line {line_num}: {e}")
-                        continue
-
-            print(f"[KUSA_DETECTOR] Found {len(kusa_events)} kusa emoji events")
-
+                                                count += len(re.findall(rp, text))
+                                        if 'emoji' in run:
+                                            emoji = run['emoji']
+                                            shortcuts = emoji.get('shortcuts', [])
+                                            search_terms = emoji.get('searchTerms', [])
+                                            
+                                            found = False
+                                            for s in shortcuts:
+                                                if s in patterns: found = True; break
+                                                if category == "kusa" and 'kusa' in s.lower(): found = True; break
+                                                if category == "kawaii" and any(k in s.lower() for k in ['kawai', 'angle', 'cute']): found = True; break
+                                            
+                                            if not found:
+                                                for t in search_terms:
+                                                    if t in patterns: found = True; break
+                                                    if category == "kusa" and 'kusa' in t.lower(): found = True; break
+                                                    if category == "kawaii" and any(k in t.lower() for k in ['kawai', 'angle', 'cute']): found = True; break
+                                            
+                                            if found: count += 1
+                                            
+                        if count > 0:
+                            events.append((timestamp, count))
+                    except: continue
         else:
-            # Standard info.json format
-            print("[KUSA_DETECTOR] Parsing standard info.json...")
+            # info.json fallback
             with open(comments_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-
-            comments = data.get('comments', [])
-            print(f"[KUSA_DETECTOR] Found {len(comments)} comments")
-
-            for c in comments:
-                # Get timestamp
-                timestamp = None
-                if 'offset_seconds' in c:
-                    timestamp = float(c['offset_seconds'])
-
-                if timestamp is None:
-                    continue
-
-                # Search for kusa in text
+            for c in data.get('comments', []):
+                timestamp = c.get('offset_seconds')
+                if timestamp is None: continue
                 text = c.get('text', '')
-                kusa_count = text.count(':*kusa*:') + text.count(':kusa:') + text.count('草')
-                
-                # Count "w" patterns (wwww, WWWW, etc.)
-                # Only count sequences of 3+ w's to avoid false positives
-                import re
-                w_matches = re.findall(r'[wWｗＷ]{3,}', text)
-                kusa_count += len(w_matches)
-                
-                # Count other kusa variations
-                kusa_count += text.count('草生える')
-                kusa_count += text.count('草生えた')
-                kusa_count += text.count('大草原')
-                kusa_count += text.count('草不可避')
-                kusa_count += text.count('くさ')
-                kusa_count += text.count('クサ')
-                kusa_count += text.count('ｸｻ')
+                count = 0
+                for p in patterns:
+                    count += text.count(p)
+                for rp in regex_patterns:
+                    import re
+                    count += len(re.findall(rp, text))
+                if count > 0:
+                    events.append((float(timestamp), count))
 
-                if kusa_count > 0:
-                    kusa_events.append((timestamp, kusa_count))
+        if not events: return []
 
-        if not kusa_events:
-            print("[KUSA_DETECTOR] No kusa emojis found in comments")
-            return []
-
-        print(f"[KUSA_DETECTOR] Total kusa emoji uses: {sum(count for _, count in kusa_events)}")
-
-        # Group by time windows (1 minute intervals)
-        window_stats = {}  # {start_time: total_kusa_count}
-
-        for timestamp, count in kusa_events:
-            # Round down to nearest minute
+        # Find peak windows
+        window_stats = {}
+        for timestamp, count in events:
             window_start = int(timestamp // clip_duration) * clip_duration
+            window_stats[window_start] = window_stats.get(window_start, 0) + count
 
-            if window_start not in window_stats:
-                window_stats[window_start] = 0
-            window_stats[window_start] += count
+        sorted_windows = sorted(window_stats.items(), key=lambda x: x[1], reverse=True)
+        top_windows = sorted_windows[:10]
+        top_windows.sort(key=lambda x: x[0])
 
-        print(f"[KUSA_DETECTOR] Analyzed {len(window_stats)} time windows")
-
-        # Create clips from windows
         clips = []
-        for start_time, kusa_count in window_stats.items():
-            end_time = min(start_time + clip_duration, video_duration)
-
-            # Skip if clip would be too short
-            if end_time - start_time < 10:
-                continue
-
+        display_category = category.capitalize() if category else "スタンプ"
+        reason_label = category if category else "指定スタンプ"
+        for i, (start_time, count) in enumerate(top_windows):
             clips.append({
                 'start': start_time,
-                'end': end_time,
-                'kusa_count': kusa_count,
-                'kusa_per_minute': kusa_count / ((end_time - start_time) / 60.0),
-                'title': f'草絵文字 {kusa_count}個 ({start_time//60:.0f}:{start_time%60:02.0f})',
-                'reason': f'この1分間に草絵文字が{kusa_count}個使われました（盛り上がっている箇所）'
+                'end': min(video_duration, start_time + clip_duration),
+                'title': f'{display_category}ハイライト {i+1}',
+                'reason': f'{reason_label}盛り上がり回数: {count}回',
+                'stars': min(5, max(1, int(count / 10))) # Simple star heuristic
             })
-
-        # Sort by kusa count (descending) and take top 10
-        clips.sort(key=lambda x: x['kusa_count'], reverse=True)
-        top_clips = clips[:10]
-
-        print(f"[KUSA_DETECTOR] Top 10 clips by kusa emoji frequency:")
-        for i, clip in enumerate(top_clips, 1):
-            print(f"  {i}. {clip['start']:.0f}-{clip['end']:.0f}s: {clip['kusa_count']} kusa emojis ({clip['kusa_per_minute']:.1f}/min)")
-
-        return top_clips
-
+        return clips
     except Exception as e:
-        print(f"[KUSA_DETECTOR] Error: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error in detect_emoji_density_clips: {e}")
         return []
+
+def detect_kusa_emoji_clips(comments_path: str, video_duration: float, clip_duration: int = 60) -> list:
+    """
+    Legacy wrapper for kusa detection.
+    """
+    return detect_emoji_density_clips(comments_path, video_duration, "kusa", None, clip_duration)
+
+
 
 def detect_comment_density_clips(comments_path: str, video_duration: float, clip_duration: int = 60) -> list:
     """

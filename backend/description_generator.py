@@ -40,7 +40,8 @@ def generate_description(
     original_url: str,
     original_title: str,
     video_description: str,
-    clip_title: str = None
+    clip_title: str = None,
+    upload_date: str = None
 ) -> str:
     """
     Generate YouTube description for a clip following Hololive fan content guidelines
@@ -69,6 +70,13 @@ def generate_description(
     lines.append("━━━━━━━━━━━━━━━━")
     lines.append("■ 元動画")
     lines.append(f"　{original_title}")
+    if upload_date:
+        # Format YYYYMMDD to YYYY/MM/DD
+        if len(upload_date) == 8:
+            formatted_date = f"{upload_date[:4]}/{upload_date[4:6]}/{upload_date[6:]}"
+            lines.append(f"　配信日: {formatted_date}")
+        else:
+            lines.append(f"　配信日: {upload_date}")
     lines.append(f"　{original_url}")
     lines.append("━━━━━━━━━━━━━━━━")
     lines.append("")

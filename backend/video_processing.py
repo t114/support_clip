@@ -134,10 +134,11 @@ def download_image_if_needed(image_url, upload_dir):
         # Assume it's already a local path
         return image_url
 
-def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None, saved_styles=None, style_map=None, default_style=None, upload_dir="backend/uploads", danmaku_ass_path=None, emoji_overlays=None):
+def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None, saved_styles=None, style_map=None, default_style=None, upload_dir="backend/uploads", danmaku_ass_path=None, emoji_overlays=None, sound_events=None):
     """
     Burn subtitles and prefix images into video using ffmpeg.
     Optional: burn Niconico-style danmaku comments with membership emojis.
+    Optional: mix sound effects (SE) at specific timestamps.
     """
 
     # Extract prefix images info (per-cue icons)
@@ -157,6 +158,21 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
     input_files = ["-i", video_path]
     current_label = "[0:v]"
     filter_parts = []
+    
+    # Handle SE inputs
+    audio_filter_parts = []
+    if sound_events:
+        for i, se in enumerate(sound_events):
+            input_files.extend(["-i", se['path']])
+            # SE delay (ms). Using both channels for stereo if needed.
+            delay_ms = int(se['time'] * 1000)
+            # Input index for SE starts from 1 (0 is the video)
+            se_input_idx = i + 1
+            audio_filter_parts.append(f"[{se_input_idx}:a]adelay={delay_ms}|{delay_ms}[se{i}]")
+        
+        # Mix original audio [0:a] with all SEs
+        se_labels = "".join([f"[se{i}]" for i in range(len(sound_events))])
+        audio_filter_parts.append(f"[0:a]{se_labels}amix=inputs={1+len(sound_events)}:duration=first[out_a]")
 
     # Handle Prefix Images (Per-cue icons)
     # Convert paths to movie filter inputs
@@ -238,10 +254,12 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
         cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", sub_filter, "-c:a", "copy", output_path]
     else:
         # Replace last label with [out]
-        # Replace last label with [out]
         last_f = filter_parts[-1]
         filter_parts[-1] = last_f[:last_f.rfind('[')] + "[out]"
-        filter_complex = ";".join(filter_parts)
+        
+        # Combine with audio filters if any
+        all_filter_parts = filter_parts + audio_filter_parts
+        filter_complex = ";".join(all_filter_parts)
 
         # Write filter_complex to file to avoid "Argument list too long"
         filter_script_path = output_path + ".filter_complex"
@@ -253,8 +271,8 @@ def burn_subtitles_with_ffmpeg(video_path, ass_path, output_path, vtt_path=None,
             *input_files,
             "-filter_complex_script", filter_script_path,
             "-map", "[out]",
-            "-map", "0:a?",
-            "-c:a", "copy",
+            "-map", "[out_a]" if sound_events else "0:a?",
+            "-c:a", "aac",
             output_path
         ]
 

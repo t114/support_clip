@@ -11,14 +11,26 @@ function EmojiManager() {
     const [selectedChannel, setSelectedChannel] = useState(null);
     const [channelDetail, setChannelDetail] = useState(null);
     const [isDetailLoading, setIsDetailLoading] = useState(false);
+    const [tempConfigs, setTempConfigs] = useState({}); // { shortcut: [category1, category2] }
+    const [isSavingConfigs, setIsSavingConfigs] = useState(false);
+    const [commonEmojis, setCommonEmojis] = useState([]);
 
     const fetchEmojis = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch('/api/emojis');
+            const [res, commonRes] = await Promise.all([
+                fetch('/api/emojis'),
+                fetch('/api/emojis/common')
+            ]);
+
             if (!res.ok) throw new Error('Failed to fetch emojis');
             const data = await res.json();
             setChannels(data.channels || []);
+
+            if (commonRes.ok) {
+                const commonData = await commonRes.json();
+                setCommonEmojis(commonData.common || []);
+            }
         } catch (e) {
             setError(e.message);
         } finally {
@@ -33,6 +45,14 @@ function EmojiManager() {
             if (!res.ok) throw new Error('Failed to fetch channel details');
             const data = await res.json();
             setChannelDetail(data);
+
+            // Build temporary configs map from current categories
+            const configs = {};
+            data.emojis.forEach(e => {
+                configs[e.shortcut] = e.categories || [];
+            });
+            setTempConfigs(configs);
+
             setSelectedChannel(cid);
         } catch (e) {
             alert(e.message);
@@ -88,6 +108,35 @@ function EmojiManager() {
         } catch (e) {
             setImportStatus('error');
             alert(e.message);
+        }
+    };
+
+    const toggleCategory = (shortcut, category) => {
+        setTempConfigs(prev => {
+            const current = prev[shortcut] || [];
+            if (current.includes(category)) {
+                return { ...prev, [shortcut]: current.filter(c => c !== category) };
+            } else {
+                return { ...prev, [shortcut]: [...current, category] };
+            }
+        });
+    };
+
+    const handleSaveConfigs = async () => {
+        setIsSavingConfigs(true);
+        try {
+            const res = await fetch(`/api/emojis/${selectedChannel}/configs`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ configs: tempConfigs })
+            });
+            if (!res.ok) throw new Error('Failed to save settings');
+            alert('設定を保存しました');
+            fetchEmojis(); // Refresh list to update samples if needed
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            setIsSavingConfigs(false);
         }
     };
 
@@ -347,15 +396,68 @@ function EmojiManager() {
                                     </button>
                                 </div>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                    {channelDetail.emojis.map((emoji, i) => (
-                                        <div key={i} className="flex flex-col items-center bg-gray-50 p-4 rounded-lg border border-gray-100 hover:border-blue-200 transition-colors">
-                                            <img src={emoji.url} alt={emoji.shortcut} className="h-12 w-12 object-contain mb-3" />
-                                            <span className="text-xs text-gray-600 font-mono break-all text-center">{emoji.shortcut}</span>
-                                        </div>
-                                    ))}
+                                    {[...channelDetail.emojis]
+                                        .sort((a, b) => {
+                                            const aIsCommon = commonEmojis.includes(a.shortcut);
+                                            const bIsCommon = commonEmojis.includes(b.shortcut);
+                                            const aHasUnderscore = a.shortcut.includes('_');
+                                            const bHasUnderscore = b.shortcut.includes('_');
+
+                                            // Priority 0: Membership stamps (not common AND has underscore)
+                                            // Priority 1: Unique stamps (not common AND no underscore)
+                                            // Priority 2: Common stamps
+                                            const aPriority = (!aIsCommon && aHasUnderscore) ? 0 : (!aIsCommon ? 1 : 2);
+                                            const bPriority = (!bIsCommon && bHasUnderscore) ? 0 : (!bIsCommon ? 1 : 2);
+
+                                            if (aPriority !== bPriority) return aPriority - bPriority;
+                                            return a.shortcut.localeCompare(b.shortcut);
+                                        })
+                                        .map((emoji, i) => {
+                                            const cats = tempConfigs[emoji.shortcut] || [];
+                                            const isCommon = commonEmojis.includes(emoji.shortcut);
+                                            return (
+                                                <div key={i} className={`flex flex-col items-center p-4 rounded-lg border transition-colors ${isCommon ? 'bg-gray-100 opacity-60 border-gray-200' : 'bg-gray-50 border-gray-100 hover:border-blue-200'
+                                                    }`}>
+                                                    <img src={emoji.url} alt={emoji.shortcut} loading="lazy" className="h-12 w-12 object-contain mb-3" />
+                                                    <div className="flex flex-col items-center gap-1 w-full">
+                                                        <span className="text-[10px] text-gray-600 font-mono break-all text-center leading-tight mb-2">
+                                                            {emoji.shortcut}
+                                                        </span>
+                                                        {isCommon && <span className="text-[9px] bg-gray-200 text-gray-500 px-1 rounded mb-2">汎用</span>}
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1 justify-center">
+                                                        <button
+                                                            onClick={() => toggleCategory(emoji.shortcut, 'kusa')}
+                                                            className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${cats.includes('kusa')
+                                                                ? 'bg-green-500 text-white border-green-600'
+                                                                : 'bg-white text-gray-400 border border-gray-200 hover:border-green-300'
+                                                                }`}
+                                                        >
+                                                            🌱 草
+                                                        </button>
+                                                        <button
+                                                            onClick={() => toggleCategory(emoji.shortcut, 'kawaii')}
+                                                            className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${cats.includes('kawaii')
+                                                                ? 'bg-pink-500 text-white border-pink-600'
+                                                                : 'bg-white text-gray-400 border border-gray-200 hover:border-pink-300'
+                                                                }`}
+                                                        >
+                                                            💕 カワイイ
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                 </div>
                             </div>
-                            <div className="bg-gray-50 px-6 py-4 flex justify-end">
+                            <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
+                                <button
+                                    onClick={handleSaveConfigs}
+                                    disabled={isSavingConfigs}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                                >
+                                    {isSavingConfigs ? '保存中...' : '設定を保存'}
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => setSelectedChannel(null)}

@@ -123,7 +123,7 @@ function StyleDropdown({ savedStyles, currentStyle, onStyleChange, recentStyleNa
     );
 }
 
-export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTime, onSeek, onPause, savedStyles, recentStyleNames, onStyleUsed }) {
+export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTime, onSeek, onPause, savedStyles, recentStyleNames, onStyleUsed, sounds }) {
     const activeIndex = subtitles.findIndex(
         sub => currentTime >= sub.start && currentTime <= sub.end
     );
@@ -134,6 +134,25 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
     const [openStyleDropdown, setOpenStyleDropdown] = useState(null);
     const [maxChars, setMaxChars] = useState(15);
     const [autoWrap, setAutoWrap] = useState(false);
+    const lastTimeRef = useRef(0);
+
+    // Automatic SE playback during preview
+    useEffect(() => {
+        const diff = currentTime - lastTimeRef.current;
+        // Only play if we are moving forward at a normal pace (avoids playing multiple sounds when seeking)
+        if (diff > 0 && diff < 0.5) {
+            subtitles.forEach(sub => {
+                if (sub.sound && lastTimeRef.current < sub.start && currentTime >= sub.start) {
+                    const s = sounds.find(x => x.name === sub.sound);
+                    if (s) {
+                        const audio = new Audio(s.url);
+                        audio.play().catch(err => console.error("SE Playback error:", err));
+                    }
+                }
+            });
+        }
+        lastTimeRef.current = currentTime;
+    }, [currentTime, subtitles, sounds]);
 
     // Helper to wrap text based on character count
     const wrapText = (text, limit) => {
@@ -305,7 +324,8 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                         />
 
                         {/* Action Buttons */}
-                        <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity items-center">
+                        <div className={`absolute top-2 right-2 flex space-x-1 transition-opacity items-center ${index === activeIndex ? 'opacity-100' : 'opacity-40 hover:opacity-100 group-hover:opacity-100'
+                            }`}>
                             {/* Style Selector */}
                             {savedStyles && Object.keys(savedStyles).length > 0 && (
                                 <StyleDropdown
@@ -319,6 +339,38 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                                     onClose={() => setOpenStyleDropdown(null)}
                                 />
                             )}
+
+                            {/* Sound Selector */}
+                            <div className="flex items-center bg-gray-50 border rounded px-1.5 py-0.5 space-x-1">
+                                <span className="text-[10px] text-gray-400">🔊</span>
+                                <select
+                                    value={sub.sound || ''}
+                                    onChange={(e) => handleChange(index, 'sound', e.target.value)}
+                                    className="text-[10px] bg-transparent border-none outline-none focus:ring-0 max-w-[80px]"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <option value="">SEなし</option>
+                                    {sounds.map(s => (
+                                        <option key={s.name} value={s.name}>{s.name}</option>
+                                    ))}
+                                </select>
+                                {sub.sound && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const s = sounds.find(x => x.name === sub.sound);
+                                            if (s) {
+                                                const audio = new Audio(s.url);
+                                                audio.play();
+                                            }
+                                        }}
+                                        className="text-[10px] hover:scale-110 transition-transform"
+                                        title="プレビュー"
+                                    >
+                                        ▶️
+                                    </button>
+                                )}
+                            </div>
 
                             <button
                                 onClick={(e) => {
