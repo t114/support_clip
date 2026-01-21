@@ -138,7 +138,9 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
 
         # Style 1: Background Box (Layer 0)
         # BorderStyle 3 = opaque box, outline value acts as padding
-        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},{primary_color},&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{box_padding},0,{alignment},{margin_l},{margin_r},{margin_v},1")
+        # PrimaryColour is set to fully transparent (&HFF000000) to avoid ghosting if metrics differ
+        # The Box color comes from OutlineColour/BackColour
+        definitions.append(f"Style: {name}_Box,{ass_font_family},{font_size},&HFF000000,&H00000000,{back_color},{back_color},{bold},0,0,0,100,100,0,0,3,{box_padding},0,{alignment},{margin_l},{margin_r},{margin_v},1")
 
         # Style 2: Outer Outline (Layer 1)
         if outer_outline_width > 0:
@@ -158,8 +160,8 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
     with open(vtt_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
         
-    current_start = 0
-    current_end = 0
+    current_start = 0.0
+    current_end = 0.0
     in_cue = False
     text_lines = []
     
@@ -179,8 +181,8 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
             if text_lines:
                 text = "\\N".join(text_lines)
                 events.append({
-                    "start": seconds_to_ass_time(current_start),
-                    "end": seconds_to_ass_time(current_end),
+                    "start_sec": current_start,
+                    "end_sec": current_end,
                     "text": text
                 })
             in_cue = False
@@ -188,10 +190,145 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
     if in_cue and text_lines:
         text = "\\N".join(text_lines)
         events.append({
-            "start": seconds_to_ass_time(current_start),
-            "end": seconds_to_ass_time(current_end),
+            "start_sec": current_start,
+            "end_sec": current_end,
             "text": text
         })
+
+    # Pre-calculate Styles for all events
+    expanded_events = []
+    
+    # Helper to get alignment code without regenerating full style def
+    alignment_map = {
+        'left': 1, 'center': 2, 'right': 3,
+        'top-left': 7, 'top': 8, 'top-right': 9,
+    }
+    
+    for i, event in enumerate(events):
+        style_name = "Default"
+        has_outer = False 
+        prefix = ""
+        alignment = 2 # default center
+        
+        # Determine Style Object
+        style_obj = styles # Default style object
+        
+        if style_map and str(i) in style_map:
+            mapped_name = style_map[str(i)]
+            safe_mapped_name = mapped_name.replace(" ", "_").replace(",", "")
+            if saved_styles and mapped_name in saved_styles:
+                style_name = safe_mapped_name
+                style_obj = saved_styles[mapped_name]
+                
+                # Check outer outline (approximate check matching create_style_def logic)
+                outer_w = int(style_obj.get('outerOutlineWidth', 0) * 1.5)
+                has_outer = (outer_w > 0)
+        else:
+             # Default style has_outer?
+             outer_w = int(styles.get('outerOutlineWidth', 0) * 1.5)
+             has_outer = (outer_w > 0)
+
+        # Resolve Prefix
+        if style_obj.get('prefixImage'):
+            prefix = ''
+        else:
+            prefix = style_obj.get('prefix', '')
+            
+        # Resolve Alignment
+        alignment = alignment_map.get(style_obj.get('alignment', 'center'), 2)
+        
+        # Helper: Get font size and base MarginV for spacing calculation
+        # This duplicates logic from create_style_def slightly but we need values here.
+        e_font_size = int(style_obj.get('fontSize', 24) * 1.5)
+        e_margin_v = int(style_obj.get('bottom', 10) * 10.8)
+        
+        # Calculate box padding (needed for offset compensation)
+        e_outline_width = int(style_obj.get('outlineWidth', 0) * 1.5)
+        e_box_padding = max(e_outline_width, 8)
+
+        expanded_events.append({
+            "start": event["start_sec"],
+            "end": event["end_sec"],
+            "text": event["text"],
+            "style_name": style_name,
+            "alignment": alignment,
+            "has_outer": has_outer,
+            "prefix": prefix,
+            "font_size": e_font_size,
+            "base_margin_v": e_margin_v,
+            "box_padding": e_box_padding
+        })
+
+
+
+    # Merge Logic: Flatten overlaps into single events
+    merged_events = []
+    
+    # 1. Collect all time points
+    points = set()
+    for e in expanded_events:
+        points.add(e["start"])
+        points.add(e["end"])
+    times = sorted(list(points))
+    
+    # 2. Iterate intervals
+    for j in range(len(times) - 1):
+        t_start = times[j]
+        t_end = times[j+1]
+        
+        if t_end - t_start < 0.01: 
+            continue
+            
+        mid = (t_start + t_end) / 2.0
+        
+        # Find active events in this interval
+        active = [e for e in expanded_events if e["start"] <= mid and e["end"] > mid]
+        if not active:
+            continue
+            
+        # Group by alignment (must share same positioning)
+        by_align = {}
+        for e in active:
+            if e["alignment"] not in by_align:
+                by_align[e["alignment"]] = []
+            by_align[e["alignment"]].append(e)
+            
+        # Create Merged Events for each alignment group
+        for align, group in by_align.items():
+            primary = group[0]
+            
+            # Combine all text lines from all overlapping groups
+            all_lines = []
+            for e in group:
+                disp_text = f"{e['prefix']} {e['text']}" if e['prefix'] else e['text']
+                # Split by \N if the original event was already multiline (from VTT)
+                sub_lines = disp_text.split('\\N')
+                all_lines.extend(sub_lines)
+            
+            line_height = primary['font_size'] * 1.1 # Tighter line height (USER REQUEST: 1.5 -> 1.1)
+            gap = 0 # No extra spacing (USER REQUEST: 0px)
+            base_v = primary['base_margin_v']
+            is_top = (primary['alignment'] in [7, 8, 9])
+            # box_padding not needed for pos calculation if anchors work correctly
+            
+            for k, line_text in enumerate(all_lines):
+                # Calculate index related offset
+                if is_top:
+                    offset_idx = k
+                else: 
+                    offset_idx = (len(all_lines) - 1) - k
+                    
+                final_margin_v = int(base_v + (offset_idx * (line_height + gap)))
+                
+                merged_events.append({
+                    "start": t_start,
+                    "end": t_end,
+                    "style_name": primary["style_name"],
+                    "has_outer": primary["has_outer"],
+                    "alignment": primary['alignment'], # Store alignment
+                    "line_text": line_text,
+                    "margin_v": final_margin_v
+                })
 
     # Generate ASS Content
     ass_lines = []
@@ -202,6 +339,7 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
     ass_lines.append("WrapStyle: 0")
     ass_lines.append("PlayResX: 1920") 
     ass_lines.append("PlayResY: 1080")
+    ass_lines.append("Collisions: Normal")
     ass_lines.append("")
     
     # Styles
@@ -213,14 +351,11 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
     ass_lines.extend(default_defs)
     
     # Saved Styles
-    saved_style_has_outer = {}
     if saved_styles:
         for name, style_obj in saved_styles.items():
-            # Sanitize name for ASS (remove spaces, commas)
             safe_name = name.replace(" ", "_").replace(",", "")
-            defs, has_outer = create_style_def(safe_name, style_obj)
+            defs, h_out = create_style_def(safe_name, style_obj)
             ass_lines.extend(defs)
-            saved_style_has_outer[safe_name] = has_outer
             
     ass_lines.append("")
     
@@ -228,52 +363,58 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
     ass_lines.append("[Events]")
     ass_lines.append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
     
-    for i, event in enumerate(events):
-        # Determine style for this event
-        style_name = "Default"
-        has_outer = default_has_outer
-        prefix = ""
-
-        # Check style map (index is string in JSON keys usually)
-        if style_map and str(i) in style_map:
-            mapped_name = style_map[str(i)]
-            safe_mapped_name = mapped_name.replace(" ", "_").replace(",", "")
-            # Verify style exists in saved_styles
-            if saved_styles and mapped_name in saved_styles:
-                style_name = safe_mapped_name
-                has_outer = saved_style_has_outer.get(safe_mapped_name, False)
-                # Get prefix from style
-                # If image prefix exists, don't add text prefix (image will be overlaid by FFmpeg)
-                if saved_styles[mapped_name].get('prefixImage'):
-                    # Image prefix exists, don't use text prefix
-                    prefix = ''
-                else:
-                    # No image prefix, use text prefix
-                    prefix = saved_styles[mapped_name].get('prefix', '')
-        else:
-            # Default style
-            # If image prefix exists, don't add text prefix (image will be overlaid by FFmpeg)
-            if styles.get('prefixImage'):
-                prefix = ''
-            else:
-                prefix = styles.get('prefix', '')
-
-        # Add prefix to text if exists
-        display_text = f"{prefix} {event['text']}" if prefix else event['text']
-
+    PlayResX = 1920
+    PlayResY = 1080
+    
+    for event in merged_events:
+        s_start = seconds_to_ass_time(event["start"])
+        s_end = seconds_to_ass_time(event["end"])
+        sty = event["style_name"]
+        mv = event["margin_v"]
+        align = event["alignment"]
+        txt = event["line_text"]
+        
+        # Calculate X, Y
+        # Default margins from Style logic (simplified)
+        # Left(1,7): L=150
+        # Right(3,9): R=150
+        # Center(2,8): L=96, R=96 (screen center)
+        
+        # X Position
+        if align in [1, 7]: # Left
+            # X = MarginL. 
+            # Note: style defined MarginL is 150 (approx). 
+            # We should probably use the same value or calculated.
+            # But the MarginL in style is just default.
+            # Here we want to pin it.
+            pos_x = 150 # Standard left margin
+        elif align in [3, 9]: # Right
+            pos_x = PlayResX - 150 
+        else: # Center
+            pos_x = PlayResX // 2
+            
+        # Y Position
+        if align in [1, 2, 3]: # Bottom
+            pos_y = PlayResY - mv
+        else: # Top
+            pos_y = mv
+            
+        pos_tag = f"\\pos({pos_x},{pos_y})"
+        
+        # We use explicit \pos, so MarginL/R/V in event line can be 0
+        
         # Layer 0: Box
-        # Use empty MarginL/R/V to inherit from style definition
-        ass_lines.append(f"Dialogue: 0,{event['start']},{event['end']},{style_name}_Box,,,,,,{display_text}")
-
-        # Layer 1: Outer Outline
-        if has_outer:
-            ass_lines.append(f"Dialogue: 1,{event['start']},{event['end']},{style_name}_Outer,,,,,,{display_text}")
-
-        # Layer 2: Inner Outline
-        ass_lines.append(f"Dialogue: 2,{event['start']},{event['end']},{style_name}_Inner,,,,,,{display_text}")
-
+        ass_lines.append(f"Dialogue: 0,{s_start},{s_end},{sty}_Box,,0,0,0,,{{{pos_tag}}}{txt}")
+        
+        # Layer 1: Outer
+        if event["has_outer"]:
+            ass_lines.append(f"Dialogue: 1,{s_start},{s_end},{sty}_Outer,,0,0,0,,{{{pos_tag}}}{txt}")
+            
+        # Layer 2: Inner
+        ass_lines.append(f"Dialogue: 2,{s_start},{s_end},{sty}_Inner,,0,0,0,,{{{pos_tag}}}{txt}")
+        
         # Layer 3: Text
-        ass_lines.append(f"Dialogue: 3,{event['start']},{event['end']},{style_name}_Text,,,,,,{display_text}")
+        ass_lines.append(f"Dialogue: 3,{s_start},{s_end},{sty}_Text,,0,0,0,,{{{pos_tag}}}{txt}")
         
     # Write to file
     with open(output_path, 'w', encoding='utf-8') as f:
