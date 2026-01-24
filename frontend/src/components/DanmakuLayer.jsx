@@ -91,7 +91,7 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
                         className="absolute whitespace-nowrap text-white font-bold pointer-events-none"
                         style={{
                             top: `${topPercent}%`,
-                            left: `${100 - (progress * 140)}%`,
+                            left: `${100 - (progress * 170)}%`,
                             fontSize: `${fontSize}px`,
                             textShadow: '2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0px 0px 4px rgba(0,0,0,0.8)',
                             opacity: 0.9,

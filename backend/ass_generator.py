@@ -306,7 +306,7 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
                 all_lines.extend(sub_lines)
             
             line_height = primary['font_size'] * 1.1 # Tighter line height (USER REQUEST: 1.5 -> 1.1)
-            gap = 0 # No extra spacing (USER REQUEST: 0px)
+            gap = 3 # Slight gap to prevent 1-2px overlap (USER REQUEST: Fix overlap)
             base_v = primary['base_margin_v']
             is_top = (primary['alignment'] in [7, 8, 9])
             # box_padding not needed for pos calculation if anchors work correctly
@@ -471,7 +471,29 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
             continue
             
         start_time = comment.get('timestamp', 0)
-        duration = random.uniform(speed_min, speed_max)
+        
+        # Estimated width for scrolling range (calculated first)
+        # Japanese/Chinese characters are typically wider than font_size
+        # Use 2.0x multiplier for safe width estimation (accounts for bold fonts, spacing, etc.)
+        text_length = len(original_text)
+        estimated_width = text_length * font_size * 2.0
+        
+        # Add generous buffer to ensure comment completely scrolls off
+        start_x = resolution_x + 100  # Start fully off right edge
+        end_x = -(estimated_width + 300)  # End fully off left edge with extra buffer
+        
+        # Calculate duration based on constant speed (pixels per second)
+        # This ensures comments completely scroll off before disappearing
+        total_distance = start_x - end_x  # Total pixels to travel
+        
+        # Match frontend preview speed: ~652 px/s (170% in 5 seconds at 1920px width)
+        # Frontend: (1920 * 1.7) / 5.0 = 652.8 px/s
+        base_speed = random.uniform(600, 700)  # pixels per second
+        
+        # Duration = distance / speed
+        # This ensures the comment reaches end_x exactly when duration ends
+        duration = total_distance / base_speed
+        
         end_time = start_time + duration
         
         # Lane selection
@@ -488,10 +510,6 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
         lane_available_times[chosen_lane] = start_time + (duration * 0.3) 
         y_pos = margin_top + (chosen_lane * lane_height) + (lane_height // 2)
         
-        # Estimated width for scrolling range
-        estimated_width = len(original_text) * font_size
-        start_x = resolution_x + 50
-        end_x = -(estimated_width + 100)
         
         # Process emojis in text
         display_text = original_text
