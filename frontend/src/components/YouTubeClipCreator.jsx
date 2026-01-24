@@ -992,20 +992,24 @@ function YouTubeClipCreator() {
                         </div>
 
                         <div className="space-y-4">
-                            {clips.map(clip => (
-                                <ClipPreview
-                                    key={clip.id}
-                                    clip={clip}
-                                    videoUrl={videoUrl}
-                                    onUpdate={updateClip}
-                                    onDelete={deleteClip}
-                                    onCreate={createClip}
-                                    isCreating={creatingClipId === clip.id}
-                                    comments={comments}
-                                    danmakuDensity={danmakuDensity}
-                                    channelId={videoInfo?.channel_id}
-                                />
-                            ))}
+                            {clips.map(clip => {
+                                // console.log('Rendering ClipPreview, filename:', videoInfo?.filename);
+                                return (
+                                    <ClipPreview
+                                        key={clip.id}
+                                        clip={clip}
+                                        videoUrl={videoUrl}
+                                        onUpdate={updateClip}
+                                        onDelete={deleteClip}
+                                        onCreate={createClip}
+                                        isCreating={creatingClipId === clip.id}
+                                        comments={comments}
+                                        danmakuDensity={danmakuDensity}
+                                        channelId={videoInfo?.channel_id}
+                                        videoFilename={videoInfo?.filename}
+                                    />
+                                );
+                            })}
                         </div>
 
                         {clips.length === 0 && (

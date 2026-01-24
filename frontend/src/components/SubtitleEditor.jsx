@@ -43,7 +43,7 @@ function StyleDropdown({ savedStyles, currentStyle, onStyleChange, recentStyleNa
                     e.stopPropagation();
                     onToggle();
                 }}
-                className="text-xs border border-gray-300 rounded px-2 py-1 mr-2 bg-white hover:bg-gray-50 max-w-[120px] truncate"
+                className="text-xs border border-gray-300 rounded px-2 py-1 bg-white hover:bg-gray-50 max-w-[120px] truncate"
                 title={currentStyle || 'デフォルト'}
             >
                 {currentStyle || 'デフォルト'}
@@ -134,6 +134,9 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
     const [openStyleDropdown, setOpenStyleDropdown] = useState(null);
     const [maxChars, setMaxChars] = useState(15);
     const [autoWrap, setAutoWrap] = useState(false);
+    const [findText, setFindText] = useState('');
+    const [replaceText, setReplaceText] = useState('');
+    const [showBulkReplace, setShowBulkReplace] = useState(false);
     const lastTimeRef = useRef(0);
 
     // Automatic SE playback during preview
@@ -174,6 +177,28 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
             text: wrapText(sub.text, maxChars)
         }));
         onSubtitlesChange(newSubtitles);
+    };
+
+    const handleBulkReplace = () => {
+        if (!findText) return;
+        let count = 0;
+        const newSubtitles = subtitles.map(sub => {
+            if (sub.text && sub.text.includes(findText)) {
+                const newText = sub.text.split(findText).join(replaceText);
+                if (newText !== sub.text) {
+                    count++;
+                    return { ...sub, text: newText };
+                }
+            }
+            return sub;
+        });
+
+        if (count > 0) {
+            onSubtitlesChange(newSubtitles);
+            alert(`${count}箇所の字幕を置換しました`);
+        } else {
+            alert('置換対象が見つかりませんでした');
+        }
     };
 
     useEffect(() => {
@@ -243,7 +268,18 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
         <div className="bg-white rounded-lg shadow flex flex-col h-[600px]">
             <div className="p-4 border-b flex flex-col space-y-3">
                 <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-gray-700">字幕編集</h3>
+                    <div className="flex items-center space-x-2">
+                        <h3 className="font-bold text-gray-700">字幕編集</h3>
+                        <button
+                            onClick={() => setShowBulkReplace(!showBulkReplace)}
+                            className={`p-1 rounded transition-colors ${showBulkReplace ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                            title={showBulkReplace ? "一括置換を隠す" : "一括置換を表示"}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </button>
+                    </div>
                     <button
                         onClick={() => handleAdd(subtitles.length - 1)}
                         className="text-sm bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
@@ -282,6 +318,41 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                         全字幕に適用
                     </button>
                 </div>
+
+                {/* Bulk Replace Settings */}
+                {/* Bulk Replace Settings */}
+                {showBulkReplace && (
+                    <div className="flex items-center space-x-4 bg-gray-50 p-2 rounded border border-gray-100">
+                        <label className="text-xs font-medium text-gray-600">一括置換:</label>
+                        <div className="flex items-center space-x-2">
+                            <input
+                                type="text"
+                                value={findText}
+                                onChange={(e) => setFindText(e.target.value)}
+                                placeholder="検索"
+                                className="w-24 text-xs border rounded px-1 py-0.5"
+                            />
+                            <span className="text-gray-400 text-xs">→</span>
+                            <input
+                                type="text"
+                                value={replaceText}
+                                onChange={(e) => setReplaceText(e.target.value)}
+                                placeholder="置換"
+                                className="w-24 text-xs border rounded px-1 py-0.5"
+                            />
+                            <button
+                                onClick={handleBulkReplace}
+                                disabled={!findText}
+                                className={`text-xs px-2 py-0.5 rounded transition-colors ${!findText
+                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    : 'bg-blue-100 hover:bg-blue-200 text-blue-700'
+                                    }`}
+                            >
+                                実行
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
             <div
                 ref={listRef}
@@ -327,20 +398,6 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                         {/* Action Buttons */}
                         <div className={`absolute top-2 right-2 flex space-x-1 transition-opacity items-center ${index === activeIndex ? 'opacity-100' : 'opacity-40 hover:opacity-100 group-hover:opacity-100'
                             }`}>
-                            {/* Style Selector */}
-                            {savedStyles && Object.keys(savedStyles).length > 0 && (
-                                <StyleDropdown
-                                    savedStyles={savedStyles}
-                                    currentStyle={sub.styleName || ''}
-                                    onStyleChange={(styleName) => handleChange(index, 'styleName', styleName)}
-                                    recentStyleNames={recentStyleNames}
-                                    onStyleUsed={onStyleUsed}
-                                    isOpen={openStyleDropdown === index}
-                                    onToggle={() => setOpenStyleDropdown(openStyleDropdown === index ? null : index)}
-                                    onClose={() => setOpenStyleDropdown(null)}
-                                />
-                            )}
-
                             {/* Sound Selector */}
                             <div className="flex items-center bg-gray-50 border rounded px-1.5 py-0.5 space-x-1">
                                 <span className="text-[10px] text-gray-400">🔊</span>
@@ -386,6 +443,20 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
                                     </>
                                 )}
                             </div>
+
+                            {/* Style Selector */}
+                            {savedStyles && Object.keys(savedStyles).length > 0 && (
+                                <StyleDropdown
+                                    savedStyles={savedStyles}
+                                    currentStyle={sub.styleName || ''}
+                                    onStyleChange={(styleName) => handleChange(index, 'styleName', styleName)}
+                                    recentStyleNames={recentStyleNames}
+                                    onStyleUsed={onStyleUsed}
+                                    isOpen={openStyleDropdown === index}
+                                    onToggle={() => setOpenStyleDropdown(openStyleDropdown === index ? null : index)}
+                                    onClose={() => setOpenStyleDropdown(null)}
+                                />
+                            )}
 
                             <button
                                 onClick={(e) => {

@@ -5,6 +5,7 @@ import shutil
 import os
 import uuid
 import requests
+import datetime
 from .transcribe import transcribe_video
 from .youtube_downloader import download_youtube_video
 from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality, count_comments_in_clips, detect_kusa_emoji_clips, detect_comment_density_clips, detect_emoji_density_clips
@@ -399,6 +400,28 @@ async def get_video_comments(video_filename: str):
     comments = extract_comments(base_name)
     return {"comments": comments}
 
+class CommentsRangeRequest(BaseModel):
+    video_filename: str
+    start: float
+    end: float
+
+@app.post("/youtube/comments/range")
+async def get_comments_range(request: CommentsRangeRequest):
+    """Get comments for a specific time range"""
+    try:
+        base_name = os.path.splitext(request.video_filename)[0]
+        all_comments = extract_comments(base_name)
+        
+        filtered_comments = [
+            c for c in all_comments 
+            if request.start <= c['timestamp'] <= request.end
+        ]
+        
+        return {"comments": filtered_comments}
+    except Exception as e:
+        logger.error(f"Error fetching range comments: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/youtube/sync-emojis")
 async def sync_emojis(request: SyncEmojiRequest):
     """Download and sync membership emojis for a channel"""
@@ -731,6 +754,7 @@ async def burn_subtitles(request: BurnRequest):
         
         # Generate Danmaku ASS if requested
         danmaku_ass_path = None
+        emoji_overlays = None
         if request.with_danmaku:
             comments_data = extract_comments(base_name)
 
@@ -1552,6 +1576,7 @@ async def create_clip(request: ClipRequest):
             }
 
         danmaku_ass_path = None
+        emoji_overlays = None
         if request.with_danmaku:
             # Extract and filter comments for this clip range
             all_comments = extract_comments(base_name)

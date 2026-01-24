@@ -19,8 +19,12 @@ function ClipPreview({
     isCreating,
     comments,
     danmakuDensity = 10,
-    channelId
+    channelId,
+    videoFilename
 }) {
+    // Debug log
+    // console.log(`ClipPreview: videoFilename=${videoFilename}`);
+
     const videoRef = useRef(null);
     const containerRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -35,6 +39,12 @@ function ClipPreview({
     const [isDragging, setIsDragging] = useState(false);
     const [dragStart, setDragStart] = useState(null); // { x, y } in pixels
     const [rectStart, setRectStart] = useState(null); // { x, y } in percentages
+
+    // Reference Comments
+    const [referenceComments, setReferenceComments] = useState([]);
+    const [showReferenceComments, setShowReferenceComments] = useState(false);
+    const [isFetchingReference, setIsFetchingReference] = useState(false);
+
 
     // Video natural dimensions
     const [videoDims, setVideoDims] = useState({ width: 0, height: 0 });
@@ -384,6 +394,35 @@ function ClipPreview({
         };
     }, [isDragging, resizeHandle, dragStart, rectStart, cropRect, cropMode, videoDims]);
 
+    const fetchReferenceComments = async () => {
+        console.log("fetchReferenceComments videoFilename:", videoFilename);
+        if (!videoFilename) {
+            alert(`動画ファイル名が見つかりません (videoFilename=${videoFilename})`);
+            return;
+        }
+        setIsFetchingReference(true);
+        try {
+            const response = await fetch('/youtube/comments/range', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    video_filename: videoFilename,
+                    start: localClip.start,
+                    end: localClip.end
+                })
+            });
+            if (!response.ok) throw new Error('コメントの取得に失敗しました');
+            const data = await response.json();
+            setReferenceComments(data.comments || []);
+            setShowReferenceComments(true);
+        } catch (e) {
+            console.error(e);
+            alert(e.message);
+        } finally {
+            setIsFetchingReference(false);
+        }
+    };
+
     const renderStars = (score) => {
         return '⭐️'.repeat(score || 0);
     };
@@ -695,6 +734,95 @@ function ClipPreview({
                         )
                     }
 
+                    {/* Reference Comments Display */}
+                    <div className="mt-2 text-right">
+                        <button
+                            onClick={fetchReferenceComments}
+                            disabled={isFetchingReference}
+                            className="text-xs text-blue-600 hover:text-blue-800 underline"
+                        >
+                            {isFetchingReference ? '読み込み中...' : 'この区間のコメントを参考資料として表示'}
+                        </button>
+                    </div>
+
+                    {showReferenceComments && (
+                        <div className="mt-2 border border-gray-200 rounded-md bg-white p-2">
+                            <div className="flex justify-between items-center mb-2 border-b pb-1">
+                                <span className="text-xs font-bold text-gray-700">参考コメント一覧 ({referenceComments.length}件)</span>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => {
+                                            const text = referenceComments.map(c => {
+                                                const relTime = Math.max(0, c.timestamp - localClip.start);
+                                                return `[${formatTime(relTime)}] ${c.text}`;
+                                            }).join('\n');
+
+                                            // Clipboard API (secure contexts)
+                                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                                navigator.clipboard.writeText(text).then(() => {
+                                                    alert('コピーしました');
+                                                }).catch(err => {
+                                                    console.warn('Clipboard API failed, trying fallback', err);
+                                                    fallbackCopyTextToClipboard(text);
+                                                });
+                                            } else {
+                                                // Fallback for non-secure contexts
+                                                fallbackCopyTextToClipboard(text);
+                                            }
+
+                                            function fallbackCopyTextToClipboard(text) {
+                                                var textArea = document.createElement("textarea");
+                                                textArea.value = text;
+
+                                                // Avoid scrolling to bottom
+                                                textArea.style.top = "0";
+                                                textArea.style.left = "0";
+                                                textArea.style.position = "fixed";
+                                                textArea.style.opacity = "0";
+
+                                                document.body.appendChild(textArea);
+                                                textArea.focus();
+                                                textArea.select();
+
+                                                try {
+                                                    var successful = document.execCommand('copy');
+                                                    if (successful) {
+                                                        alert('コピーしました');
+                                                    } else {
+                                                        alert('コピーに失敗しました');
+                                                    }
+                                                } catch (err) {
+                                                    console.error('Fallback: Oops, unable to copy', err);
+                                                    alert('コピーに失敗しました');
+                                                }
+
+                                                document.body.removeChild(textArea);
+                                            }
+                                        }}
+                                        className="text-xs text-blue-600 hover:text-blue-800"
+                                    >
+                                        全体をコピー
+                                    </button>
+                                    <button onClick={() => setShowReferenceComments(false)} className="text-xs text-gray-400 hover:text-gray-600">閉じる</button>
+                                </div>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto text-xs space-y-1">
+                                {referenceComments.length === 0 ? (
+                                    <p className="text-gray-400 italic">該当するコメントはありません</p>
+                                ) : (
+                                    referenceComments.map((c, i) => (
+                                        <div key={i} className="flex gap-2 hover:bg-gray-50 p-1 rounded">
+                                            <span className="text-gray-400 font-mono w-12 shrink-0 text-right">
+                                                {formatTime(Math.max(0, c.timestamp - localClip.start))}
+                                            </span>
+                                            <span className="text-gray-800 break-words">{c.text}</span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex justify-end space-x-3 pt-2">
                         <button
                             onClick={() => onDelete(clip.id)}
@@ -734,3 +862,4 @@ function ClipPreview({
 }
 
 export default ClipPreview;
+

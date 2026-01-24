@@ -111,7 +111,16 @@ def generate_description(
         if member.get('generation'):
             # Add generation tag if available
             gen_tag = member['generation'].replace('期生', '期')
-            if 'GAMERS' not in gen_tag:
+            if 'GAMERS' in gen_tag:
+                 # GAMERS usually don't have "Hololive" prefix in common usage or kept as is?
+                 # Existing code skipped it via 'if not ...'. Wait, existing code said:
+                 # if 'GAMERS' not in gen_tag: tags.append(f"#ホロライブ{gen_tag}")
+                 # meaning GAMERS got nothing? Or maybe they want #ホロライブゲーマーズ?
+                 # Let's stick to user request: ReGLOSS and FLOWGLOW.
+                 pass
+            elif gen_tag in ['ReGLOSS', 'FLOWGLOW']:
+                tags.append(f"#{gen_tag}")
+            elif 'GAMERS' not in gen_tag:
                 tags.append(f"#ホロライブ{gen_tag}")
 
     # Add collaboration tags for known pairs
