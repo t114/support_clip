@@ -132,10 +132,12 @@ def transcribe_video(video_path: str, progress_callback=None, model_size: str = 
         
     return vtt_path
 
+import json
+
 def parse_vtt_file(vtt_path):
     """
     Parse a VTT file and return a list of segments.
-    Each segment is a dict with 'start', 'end', 'text'.
+    Each segment is a dict with 'start', 'end', 'text', and optionally other metadata.
     """
     segments = []
     with open(vtt_path, "r", encoding="utf-8") as f:
@@ -145,7 +147,8 @@ def parse_vtt_file(vtt_path):
     current_end = 0
     in_cue = False
     text_lines = []
-    
+    pending_metadata = {}
+
     def parse_time(t):
         parts = t.split(":")
         seconds = float(parts[-1])
@@ -158,13 +161,27 @@ def parse_vtt_file(vtt_path):
     for line in lines:
         stripped = line.strip()
         
+        # Check for metadata comment
+        if stripped.startswith('NOTE metadata:'):
+            try:
+                json_str = stripped[len('NOTE metadata:'):]
+                pending_metadata = json.loads(json_str)
+            except Exception as e:
+                print(f"Error parsing metadata: {e}")
+            continue
+        
         if "-->" in stripped:
             # If we have previous text, save it
             if in_cue and text_lines:
                 segments.append({
                     "start": current_start,
                     "end": current_end,
-                    "text": "\n".join(text_lines).strip()
+                    "text": "\n".join(text_lines).strip(),
+                    # Note: Previous metadata was already applied/cleared or this is complex.
+                    # Wait, the structure here creates segment AFTER reading text.
+                    # The metadata for THIS segment was read before THIS timestamp line.
+                    # So current_metadata needs to be stored when timestamp is read.
+                    **current_segment_metadata 
                 })
                 text_lines = []
 
@@ -172,6 +189,11 @@ def parse_vtt_file(vtt_path):
             current_start = parse_time(times[0])
             current_end = parse_time(times[1])
             in_cue = True
+            
+            # Store pending metadata for the segment we just started
+            current_segment_metadata = pending_metadata.copy() if pending_metadata else {}
+            pending_metadata = {} # Clear pending
+            
         elif stripped and in_cue and "WEBVTT" not in stripped:
             # Skip cue numbers if they exist (digits only)
             if stripped.isdigit() and len(stripped) < 6:
@@ -182,9 +204,11 @@ def parse_vtt_file(vtt_path):
                 segments.append({
                     "start": current_start,
                     "end": current_end,
-                    "text": "\n".join(text_lines).strip()
+                    "text": "\n".join(text_lines).strip(),
+                    **current_segment_metadata
                 })
                 text_lines = []
+                # Don't clear current_segment_metadata here, as it belongs to the current cue which just finished
             in_cue = False
             
     # Add last segment if exists
@@ -192,7 +216,8 @@ def parse_vtt_file(vtt_path):
         segments.append({
             "start": current_start,
             "end": current_end,
-            "text": "\n".join(text_lines).strip()
+            "text": "\n".join(text_lines).strip(),
+            **current_segment_metadata
         })
 
     return segments

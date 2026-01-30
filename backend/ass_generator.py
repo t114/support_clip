@@ -90,12 +90,6 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         # shadow_offset_y = int(style_obj.get('shadowOffsetY', 0) * 1.5)
         
         # MarginV calculation (approximate)
-        # 1080 pixels is 100%, so 1% is 10.8 pixels
-        margin_v = int(style_obj.get('bottom', 10) * 10.8)
-        
-        # Alignment: 1=left, 2=center, 3=right (bottom row)
-        # Add 4 for middle row, add 8 for top row
-        # So: 1,2,3=bottom; 5,6,7=middle; 9,10,11=top (but 4,5,6 and 7,8,9 in SSA)
         # ASS uses numpad layout: 1-9 corresponding to screen positions
         alignment_map = {
             'left': 1,      # bottom-left
@@ -107,12 +101,38 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         }
         alignment = alignment_map.get(style_obj.get('alignment', 'center'), 2)
         
+        # Respect verticalDirection setting
+        vertical_direction = style_obj.get('verticalDirection', 'up')
+        
+        # If 'down', force top alignment (stack down)
+        if vertical_direction == 'down':
+            if alignment == 1: alignment = 7
+            elif alignment == 2: alignment = 8
+            elif alignment == 3: alignment = 9
+            
+        # If 'up' (default), force bottom alignment (stack up) - strictly speaking only if explicitly 'top' types are not desired behavior
+        # But usually 'top' layout means stack down. If user selects 'top' layout but wants stack up, they should probably select 'center' + pos.
+        # However, to be safe, if user explicitly chose 'up' but layout is 'top', we force it to bottom anchors.
+        elif vertical_direction == 'up':
+            if alignment == 7: alignment = 1
+            elif alignment == 8: alignment = 2
+            elif alignment == 9: alignment = 3
+        
         # Calculate total outline width for outer layer
         total_outline = outline_width + outer_outline_width
 
         # Calculate box padding for background - use minimum 8px for visibility
         box_padding = max(outline_width, 8)
 
+        # margin_b calculation based on alignment anchor
+        bottom_percent = style_obj.get('bottom', 10)
+        if alignment in [7, 8, 9]:
+            # Top anchor: MarginV is from top
+            margin_v = int((100 - bottom_percent) * 10.8)
+        else:
+            # Bottom anchor: MarginV is from bottom
+            margin_v = int(bottom_percent * 10.8)
+            
         # Calculate horizontal margins based on alignment
         # For PlayResX=1920, base margin is 5% = 96px
         # For left/right alignment, add extra margin to ensure text doesn't touch edges
@@ -237,10 +257,26 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         # Resolve Alignment
         alignment = alignment_map.get(style_obj.get('alignment', 'center'), 2)
         
+        # Respect verticalDirection setting
+        vertical_direction = style_obj.get('verticalDirection', 'up')
+        if vertical_direction == 'down':
+            if alignment == 1: alignment = 7
+            elif alignment == 2: alignment = 8
+            elif alignment == 3: alignment = 9
+        elif vertical_direction == 'up':
+            if alignment == 7: alignment = 1
+            elif alignment == 8: alignment = 2
+            elif alignment == 9: alignment = 3
+        
         # Helper: Get font size and base MarginV for spacing calculation
         # This duplicates logic from create_style_def slightly but we need values here.
         e_font_size = int(style_obj.get('fontSize', 24) * 1.5)
-        e_margin_v = int(style_obj.get('bottom', 10) * 10.8)
+        # Determine MarginV based on alignment anchor
+        bottom_percent = style_obj.get('bottom', 10)
+        if alignment in [7, 8, 9]:
+             e_margin_v = int((100 - bottom_percent) * 10.8)
+        else:
+             e_margin_v = int(bottom_percent * 10.8)
         
         # Calculate box padding (needed for offset compensation)
         e_outline_width = int(style_obj.get('outlineWidth', 0) * 1.5)
@@ -446,17 +482,26 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
     ass_lines.append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding")
     
     font_name = "Noto Sans CJK JP"
-    ass_lines.append(f"Style: Danmaku,{font_name},{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,4,0,0,0,1")
+    # Calculate scaling factors (Reference: 1920x1080)
+    scale_x = resolution_x / 1920.0
+    scale_y = resolution_y / 1080.0
+    # Use the smaller scale for consistent element sizing
+    scale_factor = min(scale_x, scale_y)
+
+    # Scale font size and margins
+    scaled_font_size = int(font_size * scale_factor)
+    margin_top = int(50 * scale_factor)
+    margin_bottom = int(100 * scale_factor)
+    
+    ass_lines.append(f"Style: Danmaku,{font_name},{scaled_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,4,0,0,0,1")
     ass_lines.append("")
     
     # Events
     ass_lines.append("[Events]")
     ass_lines.append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
     
-    margin_top = 50
-    margin_bottom = 100
     usable_height = resolution_y - margin_top - margin_bottom
-    lane_height = int(font_size * 1.2)
+    lane_height = int(scaled_font_size * 1.2)
     num_lanes = max(1, usable_height // lane_height)
     
     lane_available_times = [0.0] * num_lanes
@@ -475,20 +520,22 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
         # Estimated width for scrolling range (calculated first)
         # Japanese/Chinese characters are typically wider than font_size
         # Use 2.0x multiplier for safe width estimation (accounts for bold fonts, spacing, etc.)
+        # Use scaled_font_size for calculation
         text_length = len(original_text)
-        estimated_width = text_length * font_size * 2.0
+        estimated_width = text_length * scaled_font_size * 2.0
         
         # Add generous buffer to ensure comment completely scrolls off
-        start_x = resolution_x + 100  # Start fully off right edge
-        end_x = -(estimated_width + 300)  # End fully off left edge with extra buffer
+        start_x = resolution_x + int(100 * scale_x)  # Start fully off right edge
+        end_x = -(estimated_width + int(300 * scale_x))  # End fully off left edge with extra buffer
         
         # Calculate duration based on constant speed (pixels per second)
         # This ensures comments completely scroll off before disappearing
         total_distance = start_x - end_x  # Total pixels to travel
         
         # Match frontend preview speed: ~652 px/s (170% in 5 seconds at 1920px width)
-        # Frontend: (1920 * 1.7) / 5.0 = 652.8 px/s
-        base_speed = random.uniform(600, 700)  # pixels per second
+        # Scale speed based on resolution
+        base_speed_ref = random.uniform(600, 700)
+        base_speed = base_speed_ref * scale_x # pixels per second scaled
         
         # Duration = distance / speed
         # This ensures the comment reaches end_x exactly when duration ends
@@ -529,8 +576,8 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
                         # We guess the X position based on its character offset.
                         # Niconico style: x(t) = start_x - ((t-start)/duration)*(start_x - end_x)
                         # Offset factor: the emoji starts after 'current_offset_chars'
-                        # Roughly each char is `font_size` wide.
-                        char_offset_px = current_offset_chars * font_size
+                        # Roughly each char is `scaled_font_size` wide.
+                        char_offset_px = current_offset_chars * scaled_font_size
                         
                         # The emoji's x at time t is (text_x_at_t + char_offset_px)
                         # expression = f"({start_x}-((t-{start_time:1f})/{duration:1f})*({start_x-end_x}))+{char_offset_px}"
@@ -540,8 +587,8 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
                             "start": start_time,
                             "end": end_time,
                             "x_expr": f"({start_x}-((t-{start_time:.3f})/{duration:.3f})*({start_x - end_x}))+{char_offset_px}",
-                            "y_pos": y_pos - (font_size // 2), # Center it on the lane
-                            "size": int(font_size * 1.2)
+                            "y_pos": y_pos - (scaled_font_size // 2), # Center it on the lane
+                            "size": int(scaled_font_size * 1.2)
                         })
                         
                         # Replace with transparent placeholder to keep space? 

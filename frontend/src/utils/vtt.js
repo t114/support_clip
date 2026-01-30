@@ -2,12 +2,15 @@ export function parseVTT(vttContent) {
     const lines = vttContent.trim().split(/\r?\n/);
     const subtitles = [];
     let currentSubtitle = null;
+    let pendingMetadata = null;
 
     // Simple parser assuming Whisper output format
     // WEBVTT
     //
     // 00:00:00.000 --> 00:00:05.000
     // Text content
+    //
+    // NOTE metadata:{"styleName":"Default"}
 
     let textLines = [];
 
@@ -15,6 +18,17 @@ export function parseVTT(vttContent) {
         const line = lines[i].trim();
 
         if (line === 'WEBVTT') continue;
+
+        // Check for metadata comment
+        if (line.startsWith('NOTE metadata:')) {
+            try {
+                const jsonStr = line.substring('NOTE metadata:'.length);
+                pendingMetadata = JSON.parse(jsonStr);
+            } catch (e) {
+                console.warn('Failed to parse metadata:', e);
+            }
+            continue;
+        }
 
         if (line.includes('-->')) {
             // Save previous subtitle if it existed
@@ -28,8 +42,10 @@ export function parseVTT(vttContent) {
                 id: generateUUID(),
                 start: parseTimestamp(start),
                 end: parseTimestamp(end),
-                text: ''
+                text: '',
+                ...(pendingMetadata || {}) // Apply pending metadata
             };
+            pendingMetadata = null; // Clear used metadata
             textLines = [];
         } else if (line === '') {
             // Blank line indicates end of current cue text
@@ -61,6 +77,14 @@ export function stringifyVTT(subtitles) {
     let output = 'WEBVTT\n\n';
 
     for (const sub of subtitles) {
+        // Extract metadata (everything except standard fields)
+        const { id, start, end, text, ...metadata } = sub;
+
+        // Write metadata if present
+        if (Object.keys(metadata).length > 0) {
+            output += `NOTE metadata:${JSON.stringify(metadata)}\n\n`;
+        }
+
         output += `${formatTimestamp(sub.start)} --> ${formatTimestamp(sub.end)}\n`;
         output += `${sub.text}\n\n`;
     }

@@ -265,7 +265,6 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">水平位置</label>
                     <select
                         value={styles.alignment || 'center'}
                         onChange={(e) => handleChange('alignment', e.target.value)}
@@ -277,6 +276,19 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
                         <option value="top-left">上部・左</option>
                         <option value="top">上部・中央</option>
                         <option value="top-right">上部・右</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">改行時の展開方向</label>
+                    <select
+                        value={styles.verticalDirection || 'up'}
+                        onChange={(e) => handleChange('verticalDirection', e.target.value)}
+                        className="w-full border border-gray-300 rounded px-2 py-1"
+                        title="改行した時に、基準位置から上に向かって積み上げるか、下に向かって伸ばすかを設定します"
+                    >
+                        <option value="up">上へ (通常)</option>
+                        <option value="down">下へ</option>
                     </select>
                 </div>
 

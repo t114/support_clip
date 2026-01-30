@@ -170,6 +170,9 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
             'postprocessor_args': {
                 'ffmpeg': ['-c', 'copy']  # Use stream copy to avoid re-encoding
             },
+            # Use browser cookies to authenticate and access high quality formats (1080p)
+            # This bypasses the 403 Forbidden error for bot requests by proving we are a user
+            'cookies_from_browser': 'firefox',
         }
         
         # コメント取得オプションはここでは設定しない（後で別に行う）

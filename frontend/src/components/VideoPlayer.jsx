@@ -186,14 +186,18 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
                 };
                 const alignment = subStyle.alignment || 'center';
                 const alignStyle = alignmentStyles[alignment] || alignmentStyles.center;
-                const isTop = alignment.startsWith('top');
+                const isTopExisting = alignment.startsWith('top');
+
+                // Determine vertical anchor mode (stack down vs stack up)
+                // If verticalDirection is set, use it. Otherwise fallback to isTopExisting logic.
+                const isStackDown = subStyle.verticalDirection === 'down' || (subStyle.verticalDirection === undefined && isTopExisting);
 
                 return (
                     <div
                         key={sub.id}
                         className="absolute left-0 right-0 flex pointer-events-none transition-all duration-200"
                         style={{
-                            ...(isTop
+                            ...(isStackDown
                                 ? { top: `${100 - (subStyle.bottom || 10)}%` }
                                 : { bottom: `${subStyle.bottom || 10}%` }
                             ),
