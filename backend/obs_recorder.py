@@ -95,30 +95,33 @@ class OBSRecorder:
             self.ws.disconnect()
             logger.info("Disconnected from OBS")
 
-    def set_source_url(self, source_name, url):
-        """Updates the URL of a Browser Source in OBS."""
+    def set_source_settings(self, source_name, url=None, width=1920, height=1080, css=None):
+        """Updates the settings of a Browser Source in OBS."""
         if not self.ws:
             self.connect()
+        
+        settings = {}
+        if url:
+            settings['url'] = url
+        if width:
+            settings['width'] = width
+        if height:
+            settings['height'] = height
+        if css is not None:
+            settings['css'] = css
+
         try:
-            # For OBS 5.x (Port 4455), the request is SetInputSettings
-            # For OBS 4.x, it would be SetSourceSettings
-            # We'll try SetInputSettings first as port 4455 is the 5.x default
             self.ws.call(obs_requests.SetInputSettings(
                 inputName=source_name,
-                inputSettings={'url': url}
+                inputSettings=settings
             ))
-            logger.info(f"Updated OBS source '{source_name}' URL to: {url}")
+            logger.info(f"Updated OBS source '{source_name}' settings.")
         except Exception as e:
-            logger.warning(f"SetInputSettings failed, trying SetSourceSettings (OBS 4.x legacy): {e}")
-            try:
-                self.ws.call(obs_requests.SetSourceSettings(
-                    sourceName=source_name,
-                    sourceSettings={'url': url}
-                ))
-                logger.info(f"Updated OBS source '{source_name}' URL to: {url} (legacy mode)")
-            except Exception as e2:
-                logger.error(f"Failed to update OBS source URL: {e2}")
-                raise
+            logger.error(f"Failed to update OBS source settings: {e}")
+            raise
+
+    def set_source_url(self, source_name, url):
+        self.set_source_settings(source_name, url=url)
 
     def start_recording(self):
         if not self.ws:
@@ -385,8 +388,25 @@ def capture_clip(url, start_time, duration, output_path=None, headless=True):
             full_url = f"{url}?{t_param}"
             
         # 1. Update OBS internal browser source
+        # Aggressive CSS to make the video player fill the entire 1920x1440 area
+        custom_css = """
+        ytd-app { background: black !important; }
+        #masthead-container, #secondary, #comments, #footer, .ytd-merch-shelf-renderer, #chat, #ticket-shelf { display: none !important; }
+        .branding-img, .iv-click-target { display: none !important; }
+        ytd-watch-flexy { --ytd-watch-flexy-sidebar-width: 0px !important; --ytd-watch-flexy-max-player-width: 100% !important; margin: 0 !important; padding: 0 !important; }
+        #primary.ytd-watch-flexy { padding: 0 !important; margin: 0 !important; max-width: none !important; width: 100% !important; }
+        #player-container-outer, #player-container-inner, #player-container, #ytd-player { 
+            width: 100vw !important; height: 100vh !important; 
+            max-width: none !important; max-height: none !important;
+            padding: 0 !important; margin: 0 !important;
+        }
+        #movie_player, .html5-video-container, video { width: 100% !important; height: 100% !important; top: 0 !important; left: 0 !important; }
+        ytd-page-manager { margin-top: 0 !important; }
+        .ytp-chrome-bottom { opacity: 0 !important; } /* Hide controls voluntarily if they appear */
+        """
         logger.info(f"Updating OBS 'YouTubeSource' URL to: {full_url}")
-        recorder.set_source_url("YouTubeSource", full_url)
+        # Set resolution back to 1920x1080 but with better CSS
+        recorder.set_source_settings("YouTubeSource", url=full_url, width=1920, height=1080, css=custom_css)
         
         # Give it a moment to load
         logger.info("Waiting 7 seconds for OBS internal browser to buffer...")
