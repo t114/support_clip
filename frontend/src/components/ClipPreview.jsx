@@ -20,7 +20,8 @@ function ClipPreview({
     comments,
     danmakuDensity = 10,
     channelId,
-    videoFilename
+    videoFilename,
+    defaultUseObs = false
 }) {
     // Debug log
     // console.log(`ClipPreview: videoFilename=${videoFilename}`);
@@ -50,11 +51,16 @@ function ClipPreview({
     const [videoDims, setVideoDims] = useState({ width: 0, height: 0 });
 
     useEffect(() => {
-        setLocalClip(clip);
+        // Initialize localClip with defaultUseObs if not set in clip
+        const initialClip = { ...clip };
+        if (initialClip.use_obs_capture === undefined) {
+            initialClip.use_obs_capture = defaultUseObs;
+        }
+        setLocalClip(initialClip);
         if (clip.crop_width) {
             setShowCrop(true);
         }
-    }, [clip]);
+    }, [clip, defaultUseObs]);
 
     // Recalculate crop when video dimensions are loaded to ensure aspect ratio is correct
     useEffect(() => {
@@ -534,6 +540,23 @@ function ClipPreview({
                             onChange={(e) => handleChange('title', e.target.value)}
                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
                         />
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-2 p-3 bg-red-50 border border-red-100 rounded">
+                        <label className="flex items-center gap-2 cursor-pointer w-full">
+                            <input
+                                type="checkbox"
+                                checked={localClip.use_obs_capture || false}
+                                onChange={(e) => handleChange('use_obs_capture', e.target.checked)}
+                                className="rounded text-red-600 focus:ring-red-500"
+                            />
+                            <div>
+                                <span className="text-sm font-bold text-gray-700 block">OBSを使用して高画質キャプチャする</span>
+                                <span className="text-xs text-gray-500 block">
+                                    ※ 360p分析モード時は必須推奨。OBSが起動している必要があります。
+                                </span>
+                            </div>
+                        </label>
                     </div>
 
                     {/* Crop Controls */}

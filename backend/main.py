@@ -7,9 +7,9 @@ import uuid
 import requests
 import datetime
 from .transcribe import transcribe_video
-from .youtube_downloader import download_youtube_video
+from .youtube_downloader import download_youtube_video, download_low_quality_for_analysis
 from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality, count_comments_in_clips, detect_kusa_emoji_clips, detect_comment_density_clips, detect_emoji_density_clips
-from .video_clipper import extract_clip, merge_clips
+from .video_clipper import extract_clip, merge_clips, capture_and_process_clip
 from .config import DEFAULT_MAX_CLIPS
 from .fcpxml_generator import generate_fcpxml
 from .video_processing import get_video_info
@@ -860,6 +860,7 @@ class YouTubeDownloadRequest(BaseModel):
     url: str
     with_comments: bool = False
     model_size: str = "base"
+    analysis_mode: bool = False
 
 from .progress import update_progress, get_progress, clear_progress
 
@@ -869,7 +870,7 @@ async def get_video_progress(video_id: str):
 
 @app.post("/youtube/download")
 def download_youtube(request: YouTubeDownloadRequest):
-    logger.info(f"[YOUTUBE_DOWNLOAD] Endpoint called with URL: {request.url}, model_size: {request.model_size}, with_comments: {request.with_comments}")
+    logger.info(f"[YOUTUBE_DOWNLOAD] Endpoint called with URL: {request.url}, model_size: {request.model_size}, with_comments: {request.with_comments}, analysis_mode: {request.analysis_mode}")
     try:
         # Extract video ID early if possible, or wait until download
         import re
@@ -916,8 +917,12 @@ def download_youtube(request: YouTubeDownloadRequest):
         update_progress(video_id, "downloading", 0, "動画をダウンロード中...")
         
         # Download video (or use cache)
-        # with_commentsフラグを渡す
-        video_info = download_youtube_video(request.url, UPLOAD_DIR, download_comments=request.with_comments)
+        if request.analysis_mode:
+            logger.info("Analysis mode: downloading low quality (360p)")
+            video_info = download_low_quality_for_analysis(request.url, UPLOAD_DIR)
+        else:
+            # with_commentsフラグを渡す
+            video_info = download_youtube_video(request.url, UPLOAD_DIR, download_comments=request.with_comments)
         video_path = video_info["file_path"]
         real_video_id = video_info["id"]
         
@@ -1549,6 +1554,7 @@ class ClipRequest(BaseModel):
     crop_y: Optional[float] = None
     crop_width: Optional[float] = None
     crop_height: Optional[float] = None
+    use_obs_capture: bool = False
     with_danmaku: bool = False
     danmaku_density: int = 10
     aspect_ratio: Optional[str] = None
@@ -1580,17 +1586,11 @@ async def create_clip(request: ClipRequest):
         if request.with_danmaku:
             # Extract and filter comments for this clip range
             all_comments = extract_comments(base_name)
-            # Filter comments that fall within the clip range
-            # Note: A comment starting at t might need to be shown even if it started slightly before start?
-            # Actually, if we show it for 5s, we should include those that overlap.
-            # But let's start simple: comments that *start* within [start, end].
             clip_comments = []
             density = request.danmaku_density
             for c in all_comments:
                 if request.start <= c['timestamp'] <= request.end:
-                    # Apply density filtering (deterministic)
                     if (int(c['timestamp'] * 1000) % 100) < density:
-                        # Adjust timestamp to be relative to clip start
                         clip_comments.append({
                             'text': c['text'],
                             'timestamp': c['timestamp'] - request.start
@@ -1638,6 +1638,39 @@ async def create_clip(request: ClipRequest):
                         'path': os.path.join(SOUNDS_DIR, se['name']),
                         'time': float(se.get('time', 0))
                     })
+
+        if request.use_obs_capture:
+            # Needs URL from info.json
+            info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+            url = None
+            if os.path.exists(info_file):
+                 try:
+                     with open(info_file, 'r') as f:
+                          info = json.load(f)
+                          url = info.get('webpage_url') or info.get('original_url')
+                          if not url and info.get('id'):
+                               url = f"https://www.youtube.com/watch?v={info.get('id')}"
+                 except: pass
+            
+            if url:
+                 print(f"Using OBS Capture for clip from {url}")
+                 output_path = capture_and_process_clip(
+                      url,
+                      request.start,
+                      request.end,
+                      output_path,
+                      crop_params=crop_params,
+                      danmaku_ass_path=danmaku_ass_path,
+                      aspect_ratio=request.aspect_ratio,
+                      emoji_overlays=emoji_overlays,
+                      sound_events=processed_sounds
+                 )
+                 return {
+                     "video_url": f"/static/{output_filename}",
+                     "filename": output_filename
+                 }
+            else:
+                 print("Warning: use_obs_capture requested but URL not found. Falling back to ffmpeg.")
 
         output_path = extract_clip(
             video_path, 

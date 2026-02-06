@@ -6,6 +6,7 @@ import TwitterModal from './TwitterModal';
 function YouTubeClipCreator() {
     const [url, setUrl] = useState('');
     const [modelSize, setModelSize] = useState('none');
+    const [analysisMode, setAnalysisMode] = useState(false); // 360p download for analysis
     const [status, setStatus] = useState('idle'); // idle, downloading, analyzing, ready
     const [videoInfo, setVideoInfo] = useState(null);
     const [clips, setClips] = useState([]);
@@ -188,7 +189,8 @@ function YouTubeClipCreator() {
                 body: JSON.stringify({
                     url: trimmedUrl,
                     with_comments: withComments,
-                    model_size: modelSize
+                    model_size: modelSize,
+                    analysis_mode: analysisMode
                 })
             });
 
@@ -531,7 +533,8 @@ function YouTubeClipCreator() {
                     crop_height: clip.crop_height,
                     with_danmaku: clip.with_danmaku,
                     danmaku_density: clip.danmaku_density,
-                    aspect_ratio: clip.aspect_ratio
+                    aspect_ratio: clip.aspect_ratio,
+                    use_obs_capture: clip.use_obs_capture // Pass OBS capture flag
                 })
             });
 
@@ -590,6 +593,19 @@ function YouTubeClipCreator() {
                     >
                         {status === 'downloading' ? '処理中...' : '開始'}
                     </button>
+                </div>
+
+                <div className="mb-2 mt-2">
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={analysisMode}
+                            onChange={(e) => setAnalysisMode(e.target.checked)}
+                            disabled={status === 'downloading'}
+                            className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+                        />
+                        <span>分析モードでダウンロード (360p/高速) - クリップ作成時にOBSで高画質キャプチャします</span>
+                    </label>
                 </div>
 
                 <div className="mb-4">
@@ -1007,6 +1023,7 @@ function YouTubeClipCreator() {
                                         danmakuDensity={danmakuDensity}
                                         channelId={videoInfo?.channel_id}
                                         videoFilename={videoInfo?.filename}
+                                        defaultUseObs={analysisMode} // Pass analysis mode as default for OBS capture
                                     />
                                 );
                             })}

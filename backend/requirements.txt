@@ -8,3 +8,6 @@ ollama
 pydub
 requests
 watchfiles
+selenium
+webdriver-manager
+obs-websocket-py

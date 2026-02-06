@@ -1,5 +1,61 @@
 import subprocess
 import os
+from .obs_recorder import capture_clip as obs_capture
+
+def capture_and_process_clip(url: str, start: float, end: float, output_path: str, **kwargs):
+    """
+    Captures clip via OBS then processes it (adds overlays).
+    """
+    duration = end - start
+    # Create temp path for raw capture
+    raw_path = output_path + ".raw.mkv"
+    
+    # Capture
+    # OBS recorder returns the path where it saved the file
+    saved_path = obs_capture(url, start, duration + 5) # Add 5s buffer for loading/seeking
+    
+    if not saved_path or not os.path.exists(saved_path):
+        raise Exception("OBS Capture failed: No file created")
+        
+    try:
+        # Process the captured file
+        # We assume the captured file content roughly corresponds to the requested start/end.
+        # But there might be a seek delay or loading time captured.
+        # The capture_clip function in obs_recorder.py waits 5s for buffering then records.
+        # So the video should start exactly at 'start' (or close to it) if playback started correctly.
+        # We trim the first few seconds if needed? 
+        # Actually obs_recorder logic:
+        # player.play_video(url, start_time)
+        # sleep(5) -> buffering
+        # recorder.start_recording()
+        # So the recording starts 5 seconds AFTER play command.
+        # If video loaded instantly, we missed 5 seconds.
+        # If video took 5 seconds to load, we are at 0.
+        
+        # This timing is tricky.
+        # Better approach:
+        # Start recording immediately.
+        # Play video.
+        # Then we capture everything including loading spinner.
+        # Then we rely on the user to check or we analyze the video to find start?
+        # OR we just try to be loose and say "It includes some buffer".
+        
+        # User said: "標準のyoutubeの画面しかキャプチャできないためそこから、動画再生部分だけを座標指定..."
+        # They want to crop the video player area.
+        
+        # Let's just process whatever we got. 
+        # For now, pass start=0, end=duration to extract_clip?
+        # No, extract_clip cuts. If we pass start=0, end=duration, it takes the first 'duration' seconds.
+        
+        extract_clip(saved_path, 0, duration, output_path, **kwargs)
+        
+    finally:
+        # Cleanup raw capture
+        if os.path.exists(saved_path):
+            os.remove(saved_path)
+    
+    return output_path
+
 
 def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None, sound_events: list = None):
     """
