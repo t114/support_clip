@@ -493,7 +493,8 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
     margin_top = int(50 * scale_factor)
     margin_bottom = int(100 * scale_factor)
     
-    ass_lines.append(f"Style: Danmaku,{font_name},{scaled_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,4,0,0,0,1")
+    # Enhanced Style: Thicker outline (3) and added shadow (1) for better readability
+    ass_lines.append(f"Style: Danmaku,{font_name},{scaled_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,1,4,0,0,0,1")
     ass_lines.append("")
     
     # Events
@@ -532,13 +533,12 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
         # This ensures comments completely scroll off before disappearing
         total_distance = start_x - end_x  # Total pixels to travel
         
-        # Match frontend preview speed: ~652 px/s (170% in 5 seconds at 1920px width)
+        # Slowed down for better readability: ~466 px/s (170% in 7 seconds at 1920px width)
         # Scale speed based on resolution
-        base_speed_ref = random.uniform(600, 700)
+        base_speed_ref = random.uniform(430, 500)
         base_speed = base_speed_ref * scale_x # pixels per second scaled
         
         # Duration = distance / speed
-        # This ensures the comment reaches end_x exactly when duration ends
         duration = total_distance / base_speed
         
         end_time = start_time + duration
@@ -588,7 +588,7 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
                             "end": end_time,
                             "x_expr": f"({start_x}-((t-{start_time:.3f})/{duration:.3f})*({start_x - end_x}))+{char_offset_px}",
                             "y_pos": y_pos - (scaled_font_size // 2), # Center it on the lane
-                            "size": int(scaled_font_size * 1.2)
+                            "size": int(scaled_font_size * 1.4)
                         })
                         
                         # Replace with transparent placeholder to keep space? 

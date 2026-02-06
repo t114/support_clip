@@ -1600,8 +1600,24 @@ async def create_clip(request: ClipRequest):
                 danmaku_ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_clip_{safe_title}_danmaku.ass")
                 from .video_processing import get_video_info
                 v_info = get_video_info(video_path)
-                w = v_info.get('width', 1920) or 1920
-                h = v_info.get('height', 1080) or 1080
+                
+                # Detect the intended final resolution for overlays
+                if request.use_obs_capture:
+                    # OBS capture is 1080p
+                    w, h = 1920, 1080
+                else:
+                    w = v_info.get('width', 1920) or 1920
+                    h = v_info.get('height', 1080) or 1080
+
+                # Adjust for cropping or aspect ratio changes if they will be applied before overlays
+                # In extract_clip, the order is: Crop -> 9:16 Pad -> Danmaku
+                if request.aspect_ratio == '9:16':
+                    # Result of extract_clip with 9:16 is padded to 720x1280
+                    w, h = 720, 1280
+                elif request.crop_width and request.crop_height:
+                    # Result of cropping
+                    w, h = int(request.crop_width), int(request.crop_height)
+
                 
                 # Load emoji mapping for the channel
                 emoji_map = None

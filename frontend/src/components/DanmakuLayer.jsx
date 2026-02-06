@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 
-const DANMAKU_DURATION = 5.0; // Seconds to cross the screen
+const DANMAKU_DURATION = 7.0; // Seconds to cross the screen (increased from 5 for readability)
 const DANMAKU_LANES = 12; // Number of vertical lanes
 const FONT_SIZE_RATIO = 48 / 1080; // Same ratio as backend (48px at 1080p)
 
@@ -63,7 +63,7 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
                             src={`/static/emojis/${channelId}/${imgName}`}
                             alt={part}
                             className="inline-block align-middle"
-                            style={{ height: `${fontSize * 1.2}px`, margin: '0 2px' }}
+                            style={{ height: `${fontSize * 1.4}px`, margin: '0 2px' }}
                         />
                     );
                 }
@@ -93,8 +93,8 @@ export default function DanmakuLayer({ comments, currentTime, enabled = true, de
                             top: `${topPercent}%`,
                             left: `${100 - (progress * 170)}%`,
                             fontSize: `${fontSize}px`,
-                            textShadow: '2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0px 0px 4px rgba(0,0,0,0.8)',
-                            opacity: 0.9,
+                            textShadow: '3px 3px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0px 0px 6px rgba(0,0,0,0.8)',
+                            opacity: 1.0,
                             transition: 'left 0.1s linear',
                             willChange: 'left',
                             display: 'flex',
