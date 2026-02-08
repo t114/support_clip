@@ -123,6 +123,20 @@ class OBSRecorder:
     def set_source_url(self, source_name, url):
         self.set_source_settings(source_name, url=url)
 
+    def refresh_source(self, source_name):
+        """Forces a refresh of a browser source."""
+        if not self.ws:
+            self.connect()
+        try:
+            # For browser sources, pressing the 'refreshnocache' button is the standard way to reload
+            self.ws.call(obs_requests.PressInputPropertiesButton(
+                inputName=source_name,
+                propertyName="refreshnocache"
+            ))
+            logger.info(f"Triggered refresh for OBS source '{source_name}'.")
+        except Exception as e:
+            logger.warning(f"Could not trigger refresh for OBS source '{source_name}' (might not be a browser source or button name differs): {e}")
+
     def start_recording(self):
         if not self.ws:
             self.connect()
@@ -387,6 +401,10 @@ def capture_clip(url, start_time, duration, output_path=None, headless=True):
         else:
             full_url = f"{url}?{t_param}"
             
+        # Add a unique identifier to force reload even if retrying the same timestamp
+        reload_id = int(time.time() * 1000)
+        full_url += f"&reload_id={reload_id}"
+            
         # 1. Update OBS internal browser source
         # Aggressive CSS to make the video player fill the entire 1920x1440 area
         custom_css = """
@@ -407,6 +425,9 @@ def capture_clip(url, start_time, duration, output_path=None, headless=True):
         logger.info(f"Updating OBS 'YouTubeSource' URL to: {full_url}")
         # Set resolution back to 1920x1080 but with better CSS
         recorder.set_source_settings("YouTubeSource", url=full_url, width=1920, height=1080, css=custom_css)
+        
+        # Explicitly trigger refresh to handle cases where the URL is identical
+        recorder.refresh_source("YouTubeSource")
         
         # Give it a moment to load
         logger.info("Waiting 7 seconds for OBS internal browser to buffer...")

@@ -1558,6 +1558,7 @@ class ClipRequest(BaseModel):
     with_danmaku: bool = False
     danmaku_density: int = 10
     aspect_ratio: Optional[str] = None
+    letterbox_align: Optional[Any] = 50
     sound_events: Optional[list] = None
 
 @app.post("/youtube/create-clip")
@@ -1574,11 +1575,25 @@ async def create_clip(request: ClipRequest):
 
         crop_params = None
         if request.crop_width is not None and request.crop_height is not None:
+            # Scale coordinates if this is a low-res analysis video being captured via 1080p OBS
+            from .video_processing import get_video_info
+            v_info_analysis = get_video_info(video_path)
+            analysis_w = v_info_analysis.get('width', 1920) or 1920
+            analysis_h = v_info_analysis.get('height', 1080) or 1080
+            
+            scale_x = 1.0
+            scale_y = 1.0
+            
+            if request.use_obs_capture and analysis_w < 1920:
+                scale_x = 1920 / analysis_w
+                scale_y = 1080 / analysis_h
+                logger.info(f"Scaling crop coordinates for OBS capture: {scale_x}x")
+
             crop_params = {
-                'x': request.crop_x or 0,
-                'y': request.crop_y or 0,
-                'width': request.crop_width,
-                'height': request.crop_height
+                'x': (request.crop_x or 0) * scale_x,
+                'y': (request.crop_y or 0) * scale_y,
+                'width': request.crop_width * scale_x,
+                'height': request.crop_height * scale_y
             }
 
         danmaku_ass_path = None
@@ -1598,25 +1613,25 @@ async def create_clip(request: ClipRequest):
             
             if clip_comments:
                 danmaku_ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_clip_{safe_title}_danmaku.ass")
-                from .video_processing import get_video_info
-                v_info = get_video_info(video_path)
                 
                 # Detect the intended final resolution for overlays
                 if request.use_obs_capture:
                     # OBS capture is 1080p
-                    w, h = 1920, 1080
+                    output_w, output_h = 1920, 1080
                 else:
-                    w = v_info.get('width', 1920) or 1920
-                    h = v_info.get('height', 1080) or 1080
+                    output_w = analysis_w
+                    output_h = analysis_h
 
                 # Adjust for cropping or aspect ratio changes if they will be applied before overlays
                 # In extract_clip, the order is: Crop -> 9:16 Pad -> Danmaku
                 if request.aspect_ratio == '9:16':
                     # Result of extract_clip with 9:16 is padded to 720x1280
                     w, h = 720, 1280
-                elif request.crop_width and request.crop_height:
-                    # Result of cropping
-                    w, h = int(request.crop_width), int(request.crop_height)
+                elif crop_params and crop_params['width'] and crop_params['height']:
+                    # Result of cropping (use scaled params)
+                    w, h = int(crop_params['width']), int(crop_params['height'])
+                else:
+                    w, h = output_w, output_h
 
                 
                 # Load emoji mapping for the channel
@@ -1678,6 +1693,7 @@ async def create_clip(request: ClipRequest):
                       crop_params=crop_params,
                       danmaku_ass_path=danmaku_ass_path,
                       aspect_ratio=request.aspect_ratio,
+                      letterbox_align=request.letterbox_align,
                       emoji_overlays=emoji_overlays,
                       sound_events=processed_sounds
                  )
@@ -1696,6 +1712,7 @@ async def create_clip(request: ClipRequest):
             crop_params=crop_params, 
             danmaku_ass_path=danmaku_ass_path, 
             aspect_ratio=request.aspect_ratio,
+            letterbox_align=request.letterbox_align,
             emoji_overlays=emoji_overlays if 'emoji_overlays' in locals() else None,
             sound_events=processed_sounds
         )

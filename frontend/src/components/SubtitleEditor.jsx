@@ -164,10 +164,29 @@ export default function SubtitleEditor({ subtitles, onSubtitlesChange, currentTi
 
         // Remove existing manual line breaks first to re-wrap properly
         const cleanText = text.replace(/\n/g, '');
+        let currentLine = '';
+        let currentWeight = 0;
         const lines = [];
-        for (let i = 0; i < cleanText.length; i += limit) {
-            lines.push(cleanText.substring(i, i + limit));
+
+        for (const char of cleanText) {
+            // Half-width characters (ASCII and half-width Katakana) count as 0.5
+            const isHalfWidth = char.match(/[ -~]/) || (char.charCodeAt(0) >= 0xff61 && char.charCodeAt(0) <= 0xff9f);
+            const weight = isHalfWidth ? 0.5 : 1;
+
+            if (currentWeight + weight > limit) {
+                lines.push(currentLine);
+                currentLine = char;
+                currentWeight = weight;
+            } else {
+                currentLine += char;
+                currentWeight += weight;
+            }
         }
+
+        if (currentLine) {
+            lines.push(currentLine);
+        }
+
         return lines.join('\n');
     };
 

@@ -483,15 +483,22 @@ def generate_danmaku_ass(comments, output_path, resolution_x=1920, resolution_y=
     
     font_name = "Noto Sans CJK JP"
     # Calculate scaling factors (Reference: 1920x1080)
+    # scale_x is used for horizontal positioning and speed
     scale_x = resolution_x / 1920.0
+    # For danmaku, we primarily base size on height to ensure lane consistency 
+    # and readability in vertical videos where width is the bottleneck.
     scale_y = resolution_y / 1080.0
-    # Use the smaller scale for consistent element sizing
-    scale_factor = min(scale_x, scale_y)
 
-    # Scale font size and margins
-    scaled_font_size = int(font_size * scale_factor)
-    margin_top = int(50 * scale_factor)
-    margin_bottom = int(100 * scale_factor)
+    
+    # Scale font size and margins based on height
+    scaled_font_size = int(font_size * scale_y)
+    
+    # If the video is extremely narrow (vertical), we might want to cap it 
+    # to ensure it doesn't overflow width-wise too aggressively, 
+    # but for 9:16, height-based scaling is much better.
+    margin_top = int(50 * scale_y)
+    margin_bottom = int(100 * scale_y)
+
     
     # Enhanced Style: Thicker outline (3) and added shadow (1) for better readability
     ass_lines.append(f"Style: Danmaku,{font_name},{scaled_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,1,4,0,0,0,1")

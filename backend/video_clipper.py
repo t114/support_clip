@@ -57,13 +57,14 @@ def capture_and_process_clip(url: str, start: float, end: float, output_path: st
     return output_path
 
 
-def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None, sound_events: list = None):
+def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None, sound_events: list = None, letterbox_align: str = 'center'):
     """
     Extracts a clip from the video using ffmpeg.
     crop_params: dict with keys 'x', 'y', 'width', 'height' (optional)
     danmaku_ass_path: path to ASS file for danmaku comments (optional)
     aspect_ratio: '9:16' for vertical letterbox (optional)
     emoji_overlays: list of dicts with 'path', 'start', 'end', 'x_expr', 'y_pos', 'size' (optional)
+    letterbox_align: 'center' or 'top' for vertical alignment in 9:16 (optional)
     """
     try:
         # Ensure absolute paths
@@ -103,7 +104,20 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
         
         if aspect_ratio == '9:16':
             # Letterbox to 9:16 (720x1280)
-            filters.append(f"{current_v}scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2[916]")
+            # Support both string labels and percentage (0-100)
+            y_percent = 0.5
+            if letterbox_align == 'top':
+                y_percent = 0.0
+            elif letterbox_align == 'center':
+                y_percent = 0.5
+            else:
+                try:
+                    y_percent = float(letterbox_align) / 100.0
+                except (ValueError, TypeError):
+                    y_percent = 0.5
+            
+            y_pad = f"(oh-ih)*{y_percent}"
+            filters.append(f"{current_v}scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:{y_pad}[916]")
             current_v = "[916]"
 
         if danmaku_ass_path:

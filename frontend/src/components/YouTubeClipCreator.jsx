@@ -534,6 +534,7 @@ function YouTubeClipCreator() {
                     with_danmaku: clip.with_danmaku,
                     danmaku_density: clip.danmaku_density,
                     aspect_ratio: clip.aspect_ratio,
+                    letterbox_align: clip.letterbox_align,
                     use_obs_capture: clip.use_obs_capture // Pass OBS capture flag
                 })
             });

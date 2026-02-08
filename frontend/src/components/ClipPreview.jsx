@@ -51,10 +51,13 @@ function ClipPreview({
     const [videoDims, setVideoDims] = useState({ width: 0, height: 0 });
 
     useEffect(() => {
-        // Initialize localClip with defaultUseObs if not set in clip
+        // Initialize localClip with default values if not set
         const initialClip = { ...clip };
         if (initialClip.use_obs_capture === undefined) {
             initialClip.use_obs_capture = defaultUseObs;
+        }
+        if (initialClip.letterbox_align === undefined) {
+            initialClip.letterbox_align = 50;
         }
         setLocalClip(initialClip);
         if (clip.crop_width) {
@@ -228,7 +231,8 @@ function ClipPreview({
         if (mode === 'letterbox') {
             const updated = {
                 ...localClip,
-                aspect_ratio: '9:16'
+                aspect_ratio: '9:16',
+                letterbox_align: localClip.letterbox_align !== undefined ? localClip.letterbox_align : 50
             };
             delete updated.crop_x;
             delete updated.crop_y;
@@ -238,9 +242,13 @@ function ClipPreview({
             onUpdate(updated);
             setCropRect(null);
         } else {
-            // Clear aspect_ratio when switching back to crop
+            // Keep aspect_ratio if it's vertical to hint the backend
             const updated = { ...localClip };
-            delete updated.aspect_ratio;
+            if (mode === 'vertical') {
+                updated.aspect_ratio = '9:16';
+            } else {
+                delete updated.aspect_ratio;
+            }
             setLocalClip(updated);
             initCropRect(mode);
         }
@@ -615,6 +623,43 @@ function ClipPreview({
                                         黒枠 (9:16)
                                     </button>
                                 </div>
+                                {cropMode === 'letterbox' && (
+                                    <div className="flex flex-col gap-1 mt-1 px-1">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[10px] uppercase font-bold text-gray-400">垂直位置調整</span>
+                                            <span className="text-xs font-bold text-indigo-600">
+                                                {localClip.letterbox_align === 'top' ? '0' : (localClip.letterbox_align === 'center' ? '50' : localClip.letterbox_align)}%
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] text-gray-400">上部</span>
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                step="1"
+                                                value={localClip.letterbox_align === 'top' ? 0 : (localClip.letterbox_align === 'center' ? 50 : localClip.letterbox_align)}
+                                                onChange={(e) => handleChange('letterbox_align', parseInt(e.target.value))}
+                                                className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                            />
+                                            <span className="text-[10px] text-gray-400">下部</span>
+                                        </div>
+                                        <div className="flex justify-between px-1">
+                                            <button
+                                                onClick={() => handleChange('letterbox_align', 0)}
+                                                className="text-[10px] text-indigo-500 hover:underline"
+                                            >上端(0%)</button>
+                                            <button
+                                                onClick={() => handleChange('letterbox_align', 50)}
+                                                className="text-[10px] text-indigo-500 hover:underline"
+                                            >中央(50%)</button>
+                                            <button
+                                                onClick={() => handleChange('letterbox_align', 100)}
+                                                className="text-[10px] text-indigo-500 hover:underline"
+                                            >下端(100%)</button>
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="text-xs text-gray-500 text-center">
                                     出力解像度: {localClip.crop_width || 0} x {localClip.crop_height || 0} px
                                 </div>
