@@ -392,7 +392,7 @@ function ClipPreview({
 
                 setRect(currentTargetRect, { x: newX, y: newY });
             } else if (resizeHandle) {
-                const currentAspect = cropMode === 'horizontal' ? 16 / 9 : 9 / 16;
+                const currentAspect = (cropMode === 'horizontal' ? 16 / 9 : 9 / 16);
                 const dims = getSafeVideoDims();
                 const videoAspect = dims.width && dims.height ? dims.width / dims.height : 16 / 9;
 
@@ -439,13 +439,14 @@ function ClipPreview({
 
         const setRect = (containerRect, newRect) => {
             // Keep within bounds
-            newRect.x = Math.max(0, Math.min(100 - newRect.width, newRect.x));
-            newRect.y = Math.max(0, Math.min(100 - newRect.height, newRect.y));
+            const finalRect = { ...containerRect, ...newRect };
+            finalRect.x = Math.max(0, Math.min(100 - finalRect.width, finalRect.x));
+            finalRect.y = Math.max(0, Math.min(100 - finalRect.height, finalRect.y));
 
             if (activeCropIndex === 0) {
-                setCropRect({ ...cropRect, ...newRect });
+                setCropRect(finalRect);
             } else {
-                setCrop2Rect({ ...crop2Rect, ...newRect });
+                setCrop2Rect(finalRect);
             }
         };
 
