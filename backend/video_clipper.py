@@ -57,14 +57,16 @@ def capture_and_process_clip(url: str, start: float, end: float, output_path: st
     return output_path
 
 
-def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None, sound_events: list = None, letterbox_align: str = 'center'):
+def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None, sound_events: list = None, letterbox_align: str = 'center', secondary_crop_params: dict = None, split_ratio: float = 0.5):
     """
     Extracts a clip from the video using ffmpeg.
     crop_params: dict with keys 'x', 'y', 'width', 'height' (optional)
     danmaku_ass_path: path to ASS file for danmaku comments (optional)
-    aspect_ratio: '9:16' for vertical letterbox (optional)
+    aspect_ratio: '9:16' for vertical letterbox, 'stacked' for two-screen vertical (optional)
     emoji_overlays: list of dicts with 'path', 'start', 'end', 'x_expr', 'y_pos', 'size' (optional)
     letterbox_align: 'center' or 'top' for vertical alignment in 9:16 (optional)
+    secondary_crop_params: second crop for 'stacked' mode (optional)
+    split_ratio: ratio of top screen height (0-1) in 'stacked' mode (optional)
     """
     try:
         # Ensure absolute paths
@@ -93,7 +95,27 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
         filters = []
         current_v = "[0:v]"
         
-        if crop_params:
+        if aspect_ratio == 'stacked' and secondary_crop_params and crop_params:
+            # Stack mode: Crop two areas and stack them vertically
+            t_x, t_y, t_w, t_h = int(crop_params.get('x',0)), int(crop_params.get('y',0)), int(crop_params.get('width',0)), int(crop_params.get('height',0))
+            b_x, b_y, b_w, b_h = int(secondary_crop_params.get('x',0)), int(secondary_crop_params.get('y',0)), int(secondary_crop_params.get('width',0)), int(secondary_crop_params.get('height',0))
+            
+            # Default split ratio to 0.5 if not provided or invalid
+            try:
+                s_ratio = float(split_ratio) if split_ratio is not None else 0.5
+            except:
+                s_ratio = 0.5
+                
+            top_h = int(1280 * s_ratio)
+            bottom_h = 1280 - top_h
+            
+            # Scale both to width 720 and their respective target heights
+            # Use force_original_aspect_ratio=increase then crop to ensure the area is filled
+            filters.append(f"[0:v]crop={t_w}:{t_h}:{t_x}:{t_y},scale=720:{top_h}:force_original_aspect_ratio=increase,crop=720:{top_h}[top]")
+            filters.append(f"[0:v]crop={b_w}:{b_h}:{b_x}:{b_y},scale=720:{bottom_h}:force_original_aspect_ratio=increase,crop=720:{bottom_h}[bottom]")
+            filters.append(f"[top][bottom]vstack=inputs=2[stacked]")
+            current_v = "[stacked]"
+        elif crop_params:
             x = int(crop_params.get('x', 0))
             y = int(crop_params.get('y', 0))
             w = int(crop_params.get('width', 0))

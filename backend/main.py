@@ -1554,6 +1554,11 @@ class ClipRequest(BaseModel):
     crop_y: Optional[float] = None
     crop_width: Optional[float] = None
     crop_height: Optional[float] = None
+    crop2_x: Optional[float] = None
+    crop2_y: Optional[float] = None
+    crop2_width: Optional[float] = None
+    crop2_height: Optional[float] = None
+    split_ratio: Optional[float] = 0.5
     use_obs_capture: bool = False
     with_danmaku: bool = False
     danmaku_density: int = 10
@@ -1596,6 +1601,28 @@ async def create_clip(request: ClipRequest):
                 'height': request.crop_height * scale_y
             }
 
+        secondary_crop_params = None
+        if request.crop2_width is not None and request.crop2_height is not None:
+            # We already have scale_x/scale_y from analysis_w/h above if crop_params was set
+            # But let's make it robust in case only crop2 is set (though unlikely)
+            if 'scale_x' not in locals():
+                from .video_processing import get_video_info
+                v_info_analysis = get_video_info(video_path)
+                analysis_w = v_info_analysis.get('width', 1920) or 1920
+                analysis_h = v_info_analysis.get('height', 1080) or 1080
+                scale_x = 1.0
+                scale_y = 1.0
+                if request.use_obs_capture and analysis_w < 1920:
+                    scale_x = 1920 / analysis_w
+                    scale_y = 1080 / analysis_h
+                
+            secondary_crop_params = {
+                'x': (request.crop2_x or 0) * scale_x,
+                'y': (request.crop2_y or 0) * scale_y,
+                'width': request.crop2_width * scale_x,
+                'height': request.crop2_height * scale_y
+            }
+
         danmaku_ass_path = None
         emoji_overlays = None
         if request.with_danmaku:
@@ -1624,8 +1651,8 @@ async def create_clip(request: ClipRequest):
 
                 # Adjust for cropping or aspect ratio changes if they will be applied before overlays
                 # In extract_clip, the order is: Crop -> 9:16 Pad -> Danmaku
-                if request.aspect_ratio == '9:16':
-                    # Result of extract_clip with 9:16 is padded to 720x1280
+                if request.aspect_ratio in ['9:16', 'stacked']:
+                    # Result of extract_clip with these modes is 720x1280
                     w, h = 720, 1280
                 elif crop_params and crop_params['width'] and crop_params['height']:
                     # Result of cropping (use scaled params)
@@ -1691,6 +1718,8 @@ async def create_clip(request: ClipRequest):
                       request.end,
                       output_path,
                       crop_params=crop_params,
+                      secondary_crop_params=secondary_crop_params,
+                      split_ratio=request.split_ratio,
                       danmaku_ass_path=danmaku_ass_path,
                       aspect_ratio=request.aspect_ratio,
                       letterbox_align=request.letterbox_align,
@@ -1710,6 +1739,8 @@ async def create_clip(request: ClipRequest):
             request.end, 
             output_path, 
             crop_params=crop_params, 
+            secondary_crop_params=secondary_crop_params,
+            split_ratio=request.split_ratio,
             danmaku_ass_path=danmaku_ass_path, 
             aspect_ratio=request.aspect_ratio,
             letterbox_align=request.letterbox_align,

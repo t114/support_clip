@@ -37,6 +37,8 @@ function ClipPreview({
     const [showCrop, setShowCrop] = useState(false);
     const [cropMode, setCropMode] = useState('horizontal'); // 'horizontal' (16:9) or 'vertical' (9:16)
     const [cropRect, setCropRect] = useState(null); // { x, y, width, height } in percentages (0-100)
+    const [crop2Rect, setCrop2Rect] = useState(null); // Second rectangle for stacked mode
+    const [activeCropIndex, setActiveCropIndex] = useState(0); // 0 (main) or 1 (sub)
     const [isDragging, setIsDragging] = useState(false);
     const [dragStart, setDragStart] = useState(null); // { x, y } in pixels
     const [rectStart, setRectStart] = useState(null); // { x, y } in percentages
@@ -91,11 +93,20 @@ function ClipPreview({
             const w = (localClip.crop_width / currentDims.width) * 100;
             const h = (localClip.crop_height / currentDims.height) * 100;
             setCropRect({ x, y, width: w, height: h });
+
+            // Restore second rect if it exists
+            if (localClip.crop2_width) {
+                const x2 = (localClip.crop2_x / currentDims.width) * 100;
+                const y2 = (localClip.crop2_y / currentDims.height) * 100;
+                const w2 = (localClip.crop2_width / currentDims.width) * 100;
+                const h2 = (localClip.crop2_height / currentDims.height) * 100;
+                setCrop2Rect({ x: x2, y: y2, width: w2, height: h2 });
+            }
         } else if (showCrop && hasRealDims) {
             // If active and we just got dimensions, re-init to ensure correct aspect
             initCropRect(cropMode);
         }
-    }, [videoDims.width, videoDims.height, videoRef.current?.readyState]); // Use readyState to trigger check
+    }, [videoDims.width, videoDims.height, videoRef.current?.readyState, showCrop]); // Added showCrop to dependency
 
     const handleLoadedMetadata = () => {
         if (videoRef.current) {
@@ -166,8 +177,15 @@ function ClipPreview({
             delete updated.crop_y;
             delete updated.crop_width;
             delete updated.crop_height;
+            delete updated.crop2_x;
+            delete updated.crop2_y;
+            delete updated.crop2_width;
+            delete updated.crop2_height;
+            delete updated.split_ratio;
             setLocalClip(updated);
             onUpdate(updated);
+            setCropRect(null);
+            setCrop2Rect(null);
         }
     };
 
@@ -196,38 +214,55 @@ function ClipPreview({
         const targetAspect = mode === 'horizontal' ? 16 / 9 : 9 / 16;
         if (mode === 'letterbox') {
             setCropRect(null);
+            setCrop2Rect(null);
             return;
         }
 
-        // Start with a reasonable size (e.g., 80% width or height)
-        let w, h;
+        const createRect = (yOffset = 0) => {
+            let w, h;
+            if (containerAspect > targetAspect + 0.01) {
+                h = 40; // 40% of height for stacked mode base
+                w = h * (targetAspect / containerAspect);
+            } else {
+                w = 60; // 60% of width
+                h = w * (containerAspect / targetAspect);
+            }
+            const x = (100 - w) / 2;
+            const y = ((100 / (mode === 'stacked' ? 2 : 1)) - h) / 2 + yOffset;
+            return { x, y, width: w, height: h };
+        };
 
-        // We use a small epsilon for float comparison
-        if (containerAspect > targetAspect + 0.01) {
-            // Container is strictly wider than target.
-            // Fit by Height.
-            h = 60; // 60% of height
-            // W% = H% * (Target / Container)
-            w = h * (targetAspect / containerAspect);
+        if (mode === 'stacked') {
+            const rect1 = createRect(0);
+            const rect2 = createRect(50);
+            setCropRect(rect1);
+            setCrop2Rect(rect2);
+            updateClipCrop(rect1, 0, mode);
+            updateClipCrop(rect2, 1, mode);
         } else {
-            // Container is narrower or equal (taller)
-            // Fit by Width.
-            w = 80; // 80% of width
-            // H% = W% * (Container / Target)
-            h = w * (containerAspect / targetAspect);
+            const newRect = createRect((100 - (containerAspect > targetAspect + 0.01 ? 60 : 80)) / 2); // approximate adjustment
+            // Reset to original logic for single rect
+            let w, h;
+            if (containerAspect > targetAspect + 0.01) {
+                h = 60;
+                w = h * (targetAspect / containerAspect);
+            } else {
+                w = 80;
+                h = w * (containerAspect / targetAspect);
+            }
+            const x = (100 - w) / 2;
+            const y = (100 - h) / 2;
+            const finalRect = { x, y, width: w, height: h };
+
+            setCropRect(finalRect);
+            setCrop2Rect(null);
+            updateClipCrop(finalRect, 0, mode);
         }
-
-        // Center it
-        const x = (100 - w) / 2;
-        const y = (100 - h) / 2;
-
-        const newRect = { x, y, width: w, height: h };
-        setCropRect(newRect);
-        updateClipCrop(newRect);
     };
 
     const handleCropModeChange = (mode) => {
         setCropMode(mode);
+        setActiveCropIndex(0); // Reset to main when mode changes
         if (mode === 'letterbox') {
             const updated = {
                 ...localClip,
@@ -238,9 +273,24 @@ function ClipPreview({
             delete updated.crop_y;
             delete updated.crop_width;
             delete updated.crop_height;
+            delete updated.crop2_x;
+            delete updated.crop2_y;
+            delete updated.crop2_width;
+            delete updated.crop2_height;
+            delete updated.split_ratio;
             setLocalClip(updated);
             onUpdate(updated);
             setCropRect(null);
+            setCrop2Rect(null);
+        } else if (mode === 'stacked') {
+            const updated = {
+                ...localClip,
+                aspect_ratio: 'stacked',
+                split_ratio: localClip.split_ratio || 0.5
+            };
+            setLocalClip(updated);
+            onUpdate(updated);
+            initCropRect(mode);
         } else {
             // Keep aspect_ratio if it's vertical to hint the backend
             const updated = { ...localClip };
@@ -249,7 +299,13 @@ function ClipPreview({
             } else {
                 delete updated.aspect_ratio;
             }
+            delete updated.crop2_x;
+            delete updated.crop2_y;
+            delete updated.crop2_width;
+            delete updated.crop2_height;
+            delete updated.split_ratio;
             setLocalClip(updated);
+            onUpdate(updated);
             initCropRect(mode);
         }
     };
@@ -257,13 +313,13 @@ function ClipPreview({
     // Drag and Resize Implementation
     const [resizeHandle, setResizeHandle] = useState(null); // 'nw', 'ne', 'sw', 'se' or null
 
-    const updateClipCrop = (rect) => {
-        if (cropMode === 'letterbox') return;
+    const updateClipCrop = (rect, index = 0, currentMode = cropMode) => {
+        if (currentMode === 'letterbox') return;
         const dims = getSafeVideoDims();
         if (!dims.width || dims.width <= 16) return;
 
         // Ensure aspect ratio consistency in output
-        const currentAspect = cropMode === 'horizontal' ? 16 / 9 : 9 / 16;
+        const currentAspect = currentMode === 'horizontal' ? 16 / 9 : 9 / 16;
 
         // Convert percentages to pixels for the video
         let cropW = Math.round((rect.width / 100) * dims.width);
@@ -271,7 +327,6 @@ function ClipPreview({
         let cropH = Math.round(cropW / currentAspect);
 
         // Re-check bounds (if H pushed us out, adjust W instead?) 
-        // For simplicity, just clamp loop or trust the rounding.
         if (cropH > dims.height) {
             cropH = dims.height;
             cropW = Math.round(cropH * currentAspect);
@@ -280,13 +335,19 @@ function ClipPreview({
         const cropX = Math.round((rect.x / 100) * dims.width);
         const cropY = Math.round((rect.y / 100) * dims.height);
 
-        const updated = {
-            ...localClip,
-            crop_x: cropX,
-            crop_y: cropY,
-            crop_width: cropW,
-            crop_height: cropH
-        };
+        const updated = { ...localClip };
+        if (index === 0) {
+            updated.crop_x = cropX;
+            updated.crop_y = cropY;
+            updated.crop_width = cropW;
+            updated.crop_height = cropH;
+        } else {
+            updated.crop2_x = cropX;
+            updated.crop2_y = cropY;
+            updated.crop2_width = cropW;
+            updated.crop2_height = cropH;
+        }
+
         setLocalClip(updated);
         onUpdate(updated);
     };
@@ -296,7 +357,8 @@ function ClipPreview({
         e.stopPropagation();
 
         setDragStart({ x: e.clientX, y: e.clientY });
-        setRectStart({ ...cropRect });
+        const targetRect = activeCropIndex === 0 ? cropRect : crop2Rect;
+        setRectStart({ ...targetRect });
         if (handle) {
             setResizeHandle(handle);
         } else {
@@ -318,23 +380,23 @@ function ClipPreview({
             const deltaX = (deltaXPx / rect.width) * 100;
             const deltaY = (deltaYPx / rect.height) * 100;
 
+            const currentTargetRect = activeCropIndex === 0 ? cropRect : crop2Rect;
+
             if (isDragging) {
                 let newX = rectStart.x + deltaX;
                 let newY = rectStart.y + deltaY;
 
                 // Constrain to bounds
-                newX = Math.max(0, Math.min(100 - cropRect.width, newX));
+                newX = Math.max(0, Math.min(100 - currentTargetRect.width, newX));
+                newY = Math.max(0, Math.min(100 - currentTargetRect.height, newY));
 
-                newY = Math.max(0, Math.min(100 - cropRect.height, newY));
-
-                setCropRect({ ...cropRect, x: newX, y: newY });
+                setRect(currentTargetRect, { x: newX, y: newY });
             } else if (resizeHandle) {
                 const currentAspect = cropMode === 'horizontal' ? 16 / 9 : 9 / 16;
                 const dims = getSafeVideoDims();
                 const videoAspect = dims.width && dims.height ? dims.width / dims.height : 16 / 9;
 
                 // Factor to convert Width% change to Height% change to maintain aspect ratio
-                // H% = W% * (VideoAspect / TargetAspect)
                 const K = videoAspect / currentAspect;
 
                 let newX = rectStart.x;
@@ -342,7 +404,6 @@ function ClipPreview({
                 let newW = rectStart.width;
                 let newH = rectStart.height;
 
-                // Simple X-axis driven resize (reverted from multi-axis)
                 let dW = deltaX;
 
                 // Invert delta for left-side handles
@@ -354,7 +415,6 @@ function ClipPreview({
                 newH = newW * K;
 
                 // Min size check relative to video
-                // 16px min width seems reasonable
                 const minWPercent = (16 / dims.width) * 100;
                 if (newW < minWPercent) {
                     newW = minWPercent;
@@ -363,29 +423,29 @@ function ClipPreview({
 
                 // Apply changes based on handle position
                 if (resizeHandle === 'se') {
-                    // Top-Left fixed, grow right/down
+                    // Top-Left fixed
                 } else if (resizeHandle === 'sw') {
-                    // Top-Right fixed, grow left/down
                     newX = rectStart.x - (newW - rectStart.width);
                 } else if (resizeHandle === 'ne') {
-                    // Bottom-Left fixed, grow right/up
                     newY = rectStart.y - (newH - rectStart.height);
                 } else if (resizeHandle === 'nw') {
-                    // Bottom-Right fixed, grow left/up
                     newX = rectStart.x - (newW - rectStart.width);
                     newY = rectStart.y - (newH - rectStart.height);
                 }
 
-                // Bounds checks could go here, but clamping width usually sufficient for drag
-                // If X/Y go out of bounds, we might want to clamp them and adjust W/H back?
-                // For now, simple clamping of X/Y to valid range (0-100) done in effect loop?
-                // Actually we just set them.
+                setRect(currentTargetRect, { x: newX, y: newY, width: newW, height: newH });
+            }
+        };
 
-                // Basic clamp for position 
-                // Note: This doesn't prevent growing off-screen, but prevents moving off-screen.
-                // ideally we clamp (newX + newW) <= 100 etc.
+        const setRect = (containerRect, newRect) => {
+            // Keep within bounds
+            newRect.x = Math.max(0, Math.min(100 - newRect.width, newRect.x));
+            newRect.y = Math.max(0, Math.min(100 - newRect.height, newRect.y));
 
-                setCropRect({ x: newX, y: newY, width: newW, height: newH });
+            if (activeCropIndex === 0) {
+                setCropRect({ ...cropRect, ...newRect });
+            } else {
+                setCrop2Rect({ ...crop2Rect, ...newRect });
             }
         };
 
@@ -393,7 +453,8 @@ function ClipPreview({
             if (isDragging || resizeHandle) {
                 setIsDragging(false);
                 setResizeHandle(null);
-                updateClipCrop(cropRect);
+                const finalRect = activeCropIndex === 0 ? cropRect : crop2Rect;
+                updateClipCrop(finalRect, activeCropIndex);
             }
         };
 
@@ -406,7 +467,7 @@ function ClipPreview({
             window.removeEventListener('mousemove', onMouseMove);
             window.removeEventListener('mouseup', onMouseUp);
         };
-    }, [isDragging, resizeHandle, dragStart, rectStart, cropRect, cropMode, videoDims]);
+    }, [isDragging, resizeHandle, dragStart, rectStart, cropRect, crop2Rect, cropMode, videoDims, activeCropIndex]);
 
     const fetchReferenceComments = async () => {
         console.log("fetchReferenceComments videoFilename:", videoFilename);
@@ -474,39 +535,99 @@ function ClipPreview({
 
                     {/* Crop Overlay */}
                     {
-                        showCrop && cropMode !== 'letterbox' && cropRect && (
-                            <div
-                                className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"
-                                style={{
-                                    left: `${cropRect.x}%`,
-                                    top: `${cropRect.y}%`,
-                                    width: `${cropRect.width}%`,
-                                    height: `${cropRect.height}%`,
-                                }}
-                                onMouseDown={(e) => onMouseDown(e)}
-                            >
-                                {/* Drag Handle (Move) - Full area or specific handle? Full area typically used for move */}
-                                <div className="absolute inset-0 cursor-move"></div>
-
-                                {/* Center crosshair */}
-                                <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
-                                    <div className="w-4 h-4 border-t-2 border-l-2 border-white"></div>
-                                </div>
-
-                                {/* Resize Handles */}
-                                {['nw', 'ne', 'sw', 'se'].map(h => (
+                        showCrop && cropMode !== 'letterbox' && (
+                            <>
+                                {/* Main Rectangle (Index 0) */}
+                                {cropRect && (
                                     <div
-                                        key={h}
-                                        className={`absolute w-3 h-3 bg-white border border-gray-500 rounded-full z-10
-                                        ${h === 'nw' ? '-top-1.5 -left-1.5 cursor-nw-resize' : ''}
-                                        ${h === 'ne' ? '-top-1.5 -right-1.5 cursor-ne-resize' : ''}
-                                        ${h === 'sw' ? '-bottom-1.5 -left-1.5 cursor-sw-resize' : ''}
-                                        ${h === 'se' ? '-bottom-1.5 -right-1.5 cursor-se-resize' : ''}
-                                    `}
-                                        onMouseDown={(e) => onMouseDown(e, h)}
-                                    ></div>
-                                ))}
-                            </div>
+                                        className={`absolute border-2 ${cropMode === 'stacked' ? (activeCropIndex === 0 ? 'border-indigo-400 z-30 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]' : 'border-indigo-200 opacity-40 z-20') : 'border-white z-20 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]'}`}
+                                        style={{
+                                            left: `${cropRect.x}%`,
+                                            top: `${cropRect.y}%`,
+                                            width: `${cropRect.width}%`,
+                                            height: `${cropRect.height}%`,
+                                        }}
+                                        onMouseDown={(e) => {
+                                            if (cropMode === 'stacked') setActiveCropIndex(0);
+                                            onMouseDown(e);
+                                        }}
+                                    >
+                                        {/* Label */}
+                                        {cropMode === 'stacked' && (
+                                            <div className="absolute top-0 left-0 bg-indigo-600 text-white text-[10px] px-1 py-0.5 transform -translate-y-full whitespace-nowrap">
+                                                【メイン】上の画面
+                                            </div>
+                                        )}
+
+                                        {/* Drag Handle (Move) */}
+                                        <div className="absolute inset-0 cursor-move"></div>
+
+                                        {/* Center crosshair */}
+                                        <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
+                                            <div className="w-4 h-4 border-t-2 border-l-2 border-white"></div>
+                                        </div>
+
+                                        {/* Resize Handles (Only show if active or single mode) */}
+                                        {(cropMode !== 'stacked' || activeCropIndex === 0) && ['nw', 'ne', 'sw', 'se'].map(h => (
+                                            <div
+                                                key={h}
+                                                className={`absolute w-3 h-3 bg-white border border-gray-500 rounded-full z-10
+                                                ${h === 'nw' ? '-top-1.5 -left-1.5 cursor-nw-resize' : ''}
+                                                ${h === 'ne' ? '-top-1.5 -right-1.5 cursor-ne-resize' : ''}
+                                                ${h === 'sw' ? '-bottom-1.5 -left-1.5 cursor-sw-resize' : ''}
+                                                ${h === 'se' ? '-bottom-1.5 -right-1.5 cursor-se-resize' : ''}
+                                            `}
+                                                onMouseDown={(e) => {
+                                                    if (cropMode === 'stacked') setActiveCropIndex(0);
+                                                    onMouseDown(e, h);
+                                                }}
+                                            ></div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Secondary Rectangle (Index 1) for Stacked mode */}
+                                {cropMode === 'stacked' && crop2Rect && (
+                                    <div
+                                        className={`absolute border-2 ${activeCropIndex === 1 ? 'border-green-400 z-30 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]' : 'border-green-200 opacity-40 z-20'}`}
+                                        style={{
+                                            left: `${crop2Rect.x}%`,
+                                            top: `${crop2Rect.y}%`,
+                                            width: `${crop2Rect.width}%`,
+                                            height: `${crop2Rect.height}%`,
+                                        }}
+                                        onMouseDown={(e) => {
+                                            setActiveCropIndex(1);
+                                            onMouseDown(e);
+                                        }}
+                                    >
+                                        <div className="absolute top-0 left-0 bg-green-600 text-white text-[10px] px-1 py-0.5 transform -translate-y-full whitespace-nowrap">
+                                            【サブ】下の画面
+                                        </div>
+
+                                        <div className="absolute inset-0 cursor-move"></div>
+                                        <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
+                                            <div className="w-4 h-4 border-t-2 border-l-2 border-white"></div>
+                                        </div>
+
+                                        {activeCropIndex === 1 && ['nw', 'ne', 'sw', 'se'].map(h => (
+                                            <div
+                                                key={h}
+                                                className={`absolute w-3 h-3 bg-white border border-gray-500 rounded-full z-10
+                                                ${h === 'nw' ? '-top-1.5 -left-1.5 cursor-nw-resize' : ''}
+                                                ${h === 'ne' ? '-top-1.5 -right-1.5 cursor-ne-resize' : ''}
+                                                ${h === 'sw' ? '-bottom-1.5 -left-1.5 cursor-sw-resize' : ''}
+                                                ${h === 'se' ? '-bottom-1.5 -right-1.5 cursor-se-resize' : ''}
+                                            `}
+                                                onMouseDown={(e) => {
+                                                    setActiveCropIndex(1);
+                                                    onMouseDown(e, h);
+                                                }}
+                                            ></div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
                         )
                     }
 
@@ -622,7 +743,54 @@ function ClipPreview({
                                     >
                                         黒枠 (9:16)
                                     </button>
+                                    <button
+                                        onClick={() => handleCropModeChange('stacked')}
+                                        className={`flex-1 py-1 px-2 text-sm rounded border ${cropMode === 'stacked'
+                                            ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                            : 'bg-white border-gray-300 text-gray-600'
+                                            }`}
+                                    >
+                                        二画面 (Shorts)
+                                    </button>
                                 </div>
+                                {cropMode === 'stacked' && (
+                                    <div className="flex flex-col gap-3 mt-1 p-2 bg-indigo-50 rounded border border-indigo-100">
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setActiveCropIndex(0)}
+                                                className={`flex-1 py-1 text-[10px] rounded border transition-all ${activeCropIndex === 0 ? 'bg-indigo-600 border-indigo-700 text-white shadow-sm' : 'bg-white border-gray-300 text-gray-600'}`}
+                                            >
+                                                メイン枠(上)の操作
+                                            </button>
+                                            <button
+                                                onClick={() => setActiveCropIndex(1)}
+                                                className={`flex-1 py-1 text-[10px] rounded border transition-all ${activeCropIndex === 1 ? 'bg-indigo-600 border-indigo-700 text-white shadow-sm' : 'bg-white border-gray-300 text-gray-600'}`}
+                                            >
+                                                サブ枠(下)の操作
+                                            </button>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-[10px] uppercase font-bold text-gray-400">上下の分割比率</span>
+                                                <span className="text-xs font-bold text-indigo-600">{((localClip.split_ratio || 0.5) * 100).toFixed(0)}% : {(100 - (localClip.split_ratio || 0.5) * 100).toFixed(0)}%</span>
+                                            </div>
+                                            <input
+                                                type="range"
+                                                min="0.2"
+                                                max="0.8"
+                                                step="0.05"
+                                                value={localClip.split_ratio || 0.5}
+                                                onChange={(e) => handleChange('split_ratio', parseFloat(e.target.value))}
+                                                className="w-full h-1 bg-indigo-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                            />
+                                            <div className="flex justify-between text-[8px] text-gray-400">
+                                                <span>上が小さい</span>
+                                                <span>中央</span>
+                                                <span>上が大きい</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                 {cropMode === 'letterbox' && (
                                     <div className="flex flex-col gap-1 mt-1 px-1">
                                         <div className="flex justify-between items-center">
