@@ -1,0 +1,385 @@
+   1: Level  0 | import React, { useState, useRef, useEffect } from 'react';
+   5: Level  1 | const getRelativePos = (e, element) => {
+   7: Level  2 | return {
+  10: Level  1 | };
+  11: Level  0 | };
+  13: Level  1 | function ClipPreview({
+  25: Level  1 | }) {
+  27: Level  1 | // console.log(`ClipPreview: videoFilename=${videoFilename}`);
+  39: Level  1 | const [cropRect, setCropRect] = useState(null); // { x, y, width, height } in percentages (0-100)
+  43: Level  1 | const [dragStart, setDragStart] = useState(null); // { x, y } in pixels
+  44: Level  1 | const [rectStart, setRectStart] = useState(null); // { x, y } in percentages
+  53: Level  1 | const [videoDims, setVideoDims] = useState({ width: 0, height: 0 });
+  55: Level  2 | useEffect(() => {
+  57: Level  2 | const initialClip = { ...clip };
+  58: Level  3 | if (initialClip.use_obs_capture === undefined) {
+  60: Level  2 | }
+  61: Level  3 | if (initialClip.letterbox_align === undefined) {
+  63: Level  2 | }
+  65: Level  3 | if (clip.crop_width) {
+  67: Level  2 | }
+  68: Level  1 | }, [clip, defaultUseObs]);
+  71: Level  2 | useEffect(() => {
+  76: Level  3 | if (hasRealDims) {
+  77: Level  4 | if (videoDims.width !== videoRef.current.videoWidth || videoDims.height !== videoRef.current.videoHeight) {
+  78: Level  5 | setVideoDims({
+  81: Level  4 | });
+  83: Level  3 | }
+  84: Level  2 | }
+  88: Level  3 | if (localClip.crop_width && showCrop) {
+  89: Level  3 | const currentDims = hasRealDims ? { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight } : videoDims;
+  95: Level  3 | setCropRect({ x, y, width: w, height: h });
+  98: Level  4 | if (localClip.crop2_width) {
+ 103: Level  4 | setCrop2Rect({ x: x2, y: y2, width: w2, height: h2 });
+ 104: Level  3 | }
+ 105: Level  3 | } else if (showCrop && hasRealDims) {
+ 108: Level  2 | }
+ 109: Level  1 | }, [videoDims.width, videoDims.height, videoRef.current?.readyState, showCrop]); // Added showCrop to dependency
+ 111: Level  2 | const handleLoadedMetadata = () => {
+ 112: Level  3 | if (videoRef.current) {
+ 113: Level  4 | setVideoDims({
+ 116: Level  3 | });
+ 117: Level  2 | }
+ 118: Level  1 | };
+ 120: Level  2 | useEffect(() => {
+ 121: Level  3 | if (videoRef.current && videoRef.current.readyState >= 1) {
+ 123: Level  2 | }
+ 124: Level  1 | }, [videoUrl]);
+ 126: Level  2 | const handleTimeUpdate = () => {
+ 127: Level  3 | if (videoRef.current) {
+ 130: Level  4 | if (currentTime >= localClip.end) {
+ 134: Level  3 | }
+ 135: Level  2 | }
+ 136: Level  1 | };
+ 138: Level  2 | const formatTime = (seconds) => {
+ 141: Level  2 | return `${mins}:${secs.toString().padStart(2, '0')}`;
+ 142: Level  1 | };
+ 144: Level  2 | const playPreview = () => {
+ 145: Level  3 | if (videoRef.current) {
+ 149: Level  2 | }
+ 150: Level  1 | };
+ 152: Level  2 | const stopPreview = () => {
+ 153: Level  3 | if (videoRef.current) {
+ 156: Level  2 | }
+ 157: Level  1 | };
+ 159: Level  2 | const handleChange = (field, value) => {
+ 160: Level  2 | const updated = { ...localClip, [field]: value };
+ 163: Level  1 | };
+ 166: Level  2 | const toggleCrop = () => {
+ 170: Level  3 | if (newState && !cropRect) {
+ 173: Level  3 | } else if (!newState) {
+ 175: Level  3 | const updated = { ...localClip };
+ 189: Level  2 | }
+ 190: Level  1 | };
+ 192: Level  2 | const getSafeVideoDims = () => {
+ 194: Level  3 | if (videoRef.current && videoRef.current.videoWidth) {
+ 195: Level  4 | return {
+ 198: Level  3 | };
+ 199: Level  2 | }
+ 200: Level  2 | return { width: 16, height: 9 }; // Fallback
+ 201: Level  1 | };
+ 203: Level  2 | const initCropRect = (mode, baseClip = localClip) => {
+ 205: Level  3 | if (containerRef.current) {
+ 207: Level  4 | if (rect.width && rect.height) {
+ 209: Level  3 | }
+ 210: Level  3 | } else if (videoDims.width && videoDims.height) {
+ 212: Level  2 | }
+ 214: Level  3 | if (mode === 'stacked') {
+ 215: Level  4 | const createRect = (targetAspect, yOffset = 0) => {
+ 217: Level  5 | if (containerAspect > targetAspect + 0.01) {
+ 220: Level  5 | } else {
+ 223: Level  4 | }
+ 226: Level  4 | return { x, y, width: w, height: h };
+ 227: Level  3 | };
+ 239: Level  3 | } else if (mode === 'horizontal' || mode === 'vertical') {
+ 242: Level  4 | if (containerAspect > targetAspect + 0.01) {
+ 245: Level  4 | } else {
+ 248: Level  3 | }
+ 251: Level  3 | const finalRect = { x, y, width: w, height: h };
+ 259: Level  3 | } else {
+ 262: Level  2 | }
+ 263: Level  1 | };
+ 265: Level  2 | const handleCropModeChange = (mode) => {
+ 268: Level  3 | if (mode === 'letterbox') {
+ 269: Level  4 | const updated = {
+ 273: Level  3 | };
+ 287: Level  3 | } else if (mode === 'stacked') {
+ 288: Level  4 | const updated = {
+ 292: Level  3 | };
+ 296: Level  3 | } else {
+ 298: Level  3 | const updated = { ...localClip };
+ 299: Level  4 | if (mode === 'vertical') {
+ 301: Level  4 | } else {
+ 303: Level  3 | }
+ 312: Level  2 | }
+ 313: Level  1 | };
+ 318: Level  2 | const getUpdatedClipWithCrop = (rect, index, currentMode, baseClip) => {
+ 325: Level  3 | if (currentMode === 'stacked') {
+ 327: Level  3 | } else {
+ 329: Level  2 | }
+ 337: Level  3 | if (cropH > dims.height) {
+ 340: Level  2 | }
+ 345: Level  2 | const updated = { ...baseClip };
+ 346: Level  3 | if (index === 0) {
+ 351: Level  3 | } else {
+ 356: Level  2 | }
+ 358: Level  1 | };
+ 360: Level  2 | const updateClipCrop = (rect, index = 0, currentMode = cropMode) => {
+ 364: Level  1 | };
+ 366: Level  2 | const onMouseDown = (e, handle = null) => {
+ 370: Level  2 | setDragStart({ x: e.clientX, y: e.clientY });
+ 372: Level  2 | setRectStart({ ...targetRect });
+ 373: Level  3 | if (handle) {
+ 375: Level  3 | } else {
+ 377: Level  2 | }
+ 378: Level  1 | };
+ 380: Level  2 | useEffect(() => {
+ 381: Level  3 | const onMouseMove = (e) => {
+ 396: Level  4 | if (isDragging) {
+ 404: Level  4 | setRect(currentTargetRect, { x: newX, y: newY });
+ 405: Level  4 | } else if (resizeHandle) {
+ 407: Level  5 | if (cropMode === 'stacked') {
+ 409: Level  5 | } else {
+ 411: Level  4 | }
+ 426: Level  5 | if (resizeHandle === 'sw' || resizeHandle === 'nw') {
+ 428: Level  4 | }
+ 435: Level  5 | if (newW < minWPercent) {
+ 438: Level  4 | }
+ 441: Level  5 | if (resizeHandle === 'se') {
+ 443: Level  5 | } else if (resizeHandle === 'sw') {
+ 445: Level  5 | } else if (resizeHandle === 'ne') {
+ 447: Level  5 | } else if (resizeHandle === 'nw') {
+ 450: Level  4 | }
+ 452: Level  4 | setRect(currentTargetRect, { x: newX, y: newY, width: newW, height: newH });
+ 453: Level  3 | }
+ 454: Level  2 | };
+ 456: Level  3 | const setRect = (containerRect, newRect) => {
+ 458: Level  3 | const finalRect = { ...containerRect, ...newRect };
+ 462: Level  4 | if (activeCropIndex === 0) {
+ 464: Level  4 | } else {
+ 466: Level  3 | }
+ 467: Level  2 | };
+ 469: Level  3 | const onMouseUp = () => {
+ 470: Level  4 | if (isDragging || resizeHandle) {
+ 475: Level  3 | }
+ 476: Level  2 | };
+ 478: Level  3 | if (isDragging || resizeHandle) {
+ 481: Level  2 | }
+ 483: Level  3 | return () => {
+ 486: Level  2 | };
+ 487: Level  1 | }, [isDragging, resizeHandle, dragStart, rectStart, cropRect, crop2Rect, cropMode, videoDims, activeCropIndex]);
+ 489: Level  2 | const fetchReferenceComments = async () => {
+ 491: Level  3 | if (!videoFilename) {
+ 492: Level  3 | alert(`動画ファイル名が見つかりません (videoFilename=${videoFilename})`);
+ 494: Level  2 | }
+ 496: Level  3 | try {
+ 497: Level  4 | const response = await fetch('/youtube/comments/range', {
+ 499: Level  4 | headers: { 'Content-Type': 'application/json' },
+ 500: Level  5 | body: JSON.stringify({
+ 504: Level  4 | })
+ 505: Level  3 | });
+ 510: Level  3 | } catch (e) {
+ 513: Level  3 | } finally {
+ 515: Level  2 | }
+ 516: Level  1 | };
+ 518: Level  2 | const renderStars = (score) => {
+ 520: Level  1 | };
+ 525: Level  1 | {/* Video Preview */}
+ 527: Level  1 | ref={containerRef}
+ 529: Level  3 | style={{
+ 531: Level  1 | }}
+ 534: Level  1 | ref={videoRef}
+ 535: Level  1 | src={videoUrl}
+ 537: Level  1 | onTimeUpdate={handleTimeUpdate}
+ 538: Level  1 | onLoadedMetadata={handleLoadedMetadata}
+ 539: Level  1 | onPause={() => setIsPlaying(false)}
+ 540: Level  1 | onPlay={() => setIsPlaying(true)}
+ 543: Level  1 | {/* Danmaku Overlay */}
+ 545: Level  1 | comments={comments}
+ 546: Level  1 | currentTime={currentTime}
+ 547: Level  1 | enabled={showDanmaku}
+ 548: Level  1 | density={danmakuDensity}
+ 549: Level  1 | videoHeight={videoRef.current?.clientHeight || videoDims.height || 1080}
+ 550: Level  1 | channelId={channelId}
+ 553: Level  1 | {/* Crop Overlay */}
+ 554: Level  2 | {
+ 557: Level  2 | {/* Main Rectangle (Index 0) */}
+ 558: Level  3 | {cropRect && (
+ 560: Level  3 | className={`absolute border-2 ${cropMode === 'stacked' ? (activeCropIndex === 0 ? 'border-indigo-400 z-30 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]' : 'border-indigo-200 opacity-40 z-20') : 'border-white z-20 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]'}`}
+ 561: Level  5 | style={{
+ 562: Level  5 | left: `${cropRect.x}%`,
+ 563: Level  5 | top: `${cropRect.y}%`,
+ 564: Level  5 | width: `${cropRect.width}%`,
+ 565: Level  5 | height: `${cropRect.height}%`,
+ 566: Level  3 | }}
+ 567: Level  5 | onMouseDown={(e) => {
+ 570: Level  3 | }}
+ 572: Level  3 | {/* Label */}
+ 573: Level  4 | {cropMode === 'stacked' && (
+ 577: Level  3 | )}
+ 579: Level  3 | {/* Drag Handle (Move) */}
+ 582: Level  3 | {/* Center crosshair */}
+ 587: Level  3 | {/* Resize Handles (Only show if active or single mode) */}
+ 588: Level  4 | {(cropMode !== 'stacked' || activeCropIndex === 0) && ['nw', 'ne', 'sw', 'se'].map(h => (
+ 590: Level  4 | key={h}
+ 591: Level  5 | className={`absolute w-3 h-3 bg-white border border-gray-500 rounded-full z-10
+ 592: Level  5 | ${h === 'nw' ? '-top-1.5 -left-1.5 cursor-nw-resize' : ''}
+ 593: Level  5 | ${h === 'ne' ? '-top-1.5 -right-1.5 cursor-ne-resize' : ''}
+ 594: Level  5 | ${h === 'sw' ? '-bottom-1.5 -left-1.5 cursor-sw-resize' : ''}
+ 595: Level  5 | ${h === 'se' ? '-bottom-1.5 -right-1.5 cursor-se-resize' : ''}
+ 596: Level  4 | `}
+ 597: Level  6 | onMouseDown={(e) => {
+ 600: Level  4 | }}
+ 602: Level  3 | ))}
+ 604: Level  2 | )}
+ 606: Level  2 | {/* Secondary Rectangle (Index 1) for Stacked mode */}
+ 607: Level  3 | {cropMode === 'stacked' && crop2Rect && (
+ 609: Level  3 | className={`absolute border-2 ${activeCropIndex === 1 ? 'border-green-400 z-30 shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]' : 'border-green-200 opacity-40 z-20'}`}
+ 610: Level  5 | style={{
+ 611: Level  5 | left: `${crop2Rect.x}%`,
+ 612: Level  5 | top: `${crop2Rect.y}%`,
+ 613: Level  5 | width: `${crop2Rect.width}%`,
+ 614: Level  5 | height: `${crop2Rect.height}%`,
+ 615: Level  3 | }}
+ 616: Level  5 | onMouseDown={(e) => {
+ 619: Level  3 | }}
+ 630: Level  4 | {activeCropIndex === 1 && ['nw', 'ne', 'sw', 'se'].map(h => (
+ 632: Level  4 | key={h}
+ 633: Level  5 | className={`absolute w-3 h-3 bg-white border border-gray-500 rounded-full z-10
+ 634: Level  5 | ${h === 'nw' ? '-top-1.5 -left-1.5 cursor-nw-resize' : ''}
+ 635: Level  5 | ${h === 'ne' ? '-top-1.5 -right-1.5 cursor-ne-resize' : ''}
+ 636: Level  5 | ${h === 'sw' ? '-bottom-1.5 -left-1.5 cursor-sw-resize' : ''}
+ 637: Level  5 | ${h === 'se' ? '-bottom-1.5 -right-1.5 cursor-se-resize' : ''}
+ 638: Level  4 | `}
+ 639: Level  6 | onMouseDown={(e) => {
+ 642: Level  4 | }}
+ 644: Level  3 | ))}
+ 646: Level  2 | )}
+ 649: Level  1 | }
+ 651: Level  1 | {/* Time Display */}
+ 653: Level  1 | {formatTime(currentTime)} / {formatTime(localClip.end - localClip.start)}
+ 656: Level  2 | {!isPlaying ? (
+ 658: Level  2 | onClick={playPreview}
+ 662: Level  2 | <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+ 663: Level  2 | <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+ 668: Level  2 | onClick={stopPreview}
+ 672: Level  2 | <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+ 675: Level  1 | )}
+ 679: Level  1 | {/* Controls */}
+ 685: Level  1 | value={localClip.title}
+ 686: Level  1 | onChange={(e) => handleChange('title', e.target.value)}
+ 695: Level  1 | checked={localClip.use_obs_capture || false}
+ 696: Level  1 | onChange={(e) => handleChange('use_obs_capture', e.target.checked)}
+ 708: Level  1 | {/* Crop Controls */}
+ 714: Level  1 | checked={showCrop}
+ 715: Level  1 | onChange={toggleCrop}
+ 720: Level  2 | {comments && comments.length > 0 && (
+ 724: Level  2 | checked={showDanmaku}
+ 725: Level  2 | onChange={(e) => setShowDanmaku(e.target.checked)}
+ 730: Level  1 | )}
+ 733: Level  2 | {showCrop && (
+ 737: Level  2 | onClick={() => handleCropModeChange('horizontal')}
+ 738: Level  4 | className={`flex-1 py-1 px-2 text-sm rounded border ${cropMode === 'horizontal'
+ 741: Level  2 | }`}
+ 746: Level  2 | onClick={() => handleCropModeChange('vertical')}
+ 747: Level  4 | className={`flex-1 py-1 px-2 text-sm rounded border ${cropMode === 'vertical'
+ 750: Level  2 | }`}
+ 755: Level  2 | onClick={() => handleCropModeChange('letterbox')}
+ 756: Level  4 | className={`flex-1 py-1 px-2 text-sm rounded border ${cropMode === 'letterbox'
+ 759: Level  2 | }`}
+ 764: Level  2 | onClick={() => handleCropModeChange('stacked')}
+ 765: Level  4 | className={`flex-1 py-1 px-2 text-sm rounded border ${cropMode === 'stacked'
+ 768: Level  2 | }`}
+ 773: Level  3 | {cropMode === 'stacked' && (
+ 777: Level  3 | onClick={() => setActiveCropIndex(0)}
+ 778: Level  3 | className={`flex-1 py-1 text-[10px] rounded border transition-all ${activeCropIndex === 0 ? 'bg-indigo-600 border-indigo-700 text-white shadow-sm' : 'bg-white border-gray-300 text-gray-600'}`}
+ 783: Level  3 | onClick={() => setActiveCropIndex(1)}
+ 784: Level  3 | className={`flex-1 py-1 text-[10px] rounded border transition-all ${activeCropIndex === 1 ? 'bg-indigo-600 border-indigo-700 text-white shadow-sm' : 'bg-white border-gray-300 text-gray-600'}`}
+ 792: Level  3 | <span className="text-xs font-bold text-indigo-600">{((localClip.split_ratio || 0.5) * 100).toFixed(0)}% : {(100 - (localClip.split_ratio || 0.5) * 100).toFixed(0)}%</span>
+ 799: Level  3 | value={localClip.split_ratio || 0.5}
+ 800: Level  3 | onChange={(e) => handleChange('split_ratio', parseFloat(e.target.value))}
+ 810: Level  2 | )}
+ 811: Level  3 | {cropMode === 'letterbox' && (
+ 816: Level  3 | {localClip.letterbox_align === 'top' ? '0' : (localClip.letterbox_align === 'center' ? '50' : localClip.letterbox_align)}%
+ 826: Level  3 | value={localClip.letterbox_align === 'top' ? 0 : (localClip.letterbox_align === 'center' ? 50 : localClip.letterbox_align)}
+ 827: Level  3 | onChange={(e) => handleChange('letterbox_align', parseInt(e.target.value))}
+ 834: Level  3 | onClick={() => handleChange('letterbox_align', 0)}
+ 838: Level  3 | onClick={() => handleChange('letterbox_align', 50)}
+ 842: Level  3 | onClick={() => handleChange('letterbox_align', 100)}
+ 847: Level  2 | )}
+ 849: Level  2 | 出力解像度: {localClip.crop_width || 0} x {localClip.crop_height || 0} px
+ 852: Level  1 | )}
+ 861: Level  1 | value={Math.floor(localClip.start / 3600)}
+ 862: Level  3 | onChange={(e) => {
+ 867: Level  1 | }}
+ 875: Level  1 | value={Math.floor((localClip.start % 3600) / 60)}
+ 876: Level  3 | onChange={(e) => {
+ 881: Level  1 | }}
+ 890: Level  1 | value={Math.floor(localClip.start % 60)}
+ 891: Level  3 | onChange={(e) => {
+ 896: Level  1 | }}
+ 903: Level  1 | <div className="text-xs text-gray-500 mt-0.5">{localClip.start.toFixed(1)}秒</div>
+ 910: Level  1 | value={Math.floor(localClip.end / 3600)}
+ 911: Level  3 | onChange={(e) => {
+ 916: Level  1 | }}
+ 924: Level  1 | value={Math.floor((localClip.end % 3600) / 60)}
+ 925: Level  3 | onChange={(e) => {
+ 930: Level  1 | }}
+ 939: Level  1 | value={Math.floor(localClip.end % 60)}
+ 940: Level  3 | onChange={(e) => {
+ 945: Level  1 | }}
+ 952: Level  1 | <div className="text-xs text-gray-500 mt-0.5">{localClip.end.toFixed(1)}秒</div>
+ 957: Level  1 | <p>理由: {localClip.reason || "手動追加"}</p>
+ 958: Level  1 | <p>長さ: {(localClip.end - localClip.start).toFixed(1)}秒</p>
+ 961: Level  1 | {/* AI Evaluation Section */}
+ 962: Level  2 | {
+ 967: Level  2 | <span className="text-lg">{renderStars(localClip.evaluation_score)}</span>
+ 969: Level  2 | <p className="text-xs text-gray-600">{localClip.evaluation_reason}</p>
+ 972: Level  1 | }
+ 974: Level  1 | {/* Comment Count Section */}
+ 975: Level  2 | {
+ 981: Level  2 | <span className="text-lg font-bold text-blue-700">{localClip.comment_count}</span>
+ 983: Level  2 | ({localClip.comments_per_minute !== undefined ? localClip.comments_per_minute : ((localClip.comment_count / (localClip.end - localClip.start)) * 60).toFixed(1)}/分)
+ 988: Level  1 | }
+ 990: Level  1 | {/* Reference Comments Display */}
+ 993: Level  1 | onClick={fetchReferenceComments}
+ 994: Level  1 | disabled={isFetchingReference}
+ 997: Level  1 | {isFetchingReference ? '読み込み中...' : 'この区間のコメントを参考資料として表示'}
+1001: Level  2 | {showReferenceComments && (
+1004: Level  2 | <span className="text-xs font-bold text-gray-700">参考コメント一覧 ({referenceComments.length}件)</span>
+1007: Level  4 | onClick={() => {
+1008: Level  5 | const text = referenceComments.map(c => {
+1010: Level  5 | return `[${formatTime(relTime)}] ${c.text}`;
+1011: Level  4 | }).join('\n');
+1014: Level  5 | if (navigator.clipboard && navigator.clipboard.writeText) {
+1015: Level  6 | navigator.clipboard.writeText(text).then(() => {
+1017: Level  6 | }).catch(err => {
+1020: Level  5 | });
+1021: Level  5 | } else {
+1024: Level  4 | }
+1026: Level  5 | function fallbackCopyTextToClipboard(text) {
+1040: Level  6 | try {
+1042: Level  7 | if (successful) {
+1044: Level  7 | } else {
+1046: Level  6 | }
+1047: Level  6 | } catch (err) {
+1050: Level  5 | }
+1053: Level  4 | }
+1054: Level  2 | }}
+1059: Level  2 | <button onClick={() => setShowReferenceComments(false)} className="text-xs text-gray-400 hover:text-gray-600">閉じる</button>
+1063: Level  3 | {referenceComments.length === 0 ? (
+1067: Level  3 | <div key={i} className="flex gap-2 hover:bg-gray-50 p-1 rounded">
+1069: Level  3 | {formatTime(Math.max(0, c.timestamp - localClip.start))}
+1071: Level  3 | <span className="text-gray-800 break-words">{c.text}</span>
+1074: Level  2 | )}
+1077: Level  1 | )}
+1081: Level  1 | onClick={() => onDelete(clip.id)}
+1087: Level  3 | onClick={() => onCreate({
+1091: Level  1 | })}
+1092: Level  1 | disabled={isCreating}
+1093: Level  3 | className={`px-3 py-1.5 text-white rounded text-sm font-medium ${isCreating
+1096: Level  1 | }`}
+1098: Level  2 | {isCreating ? (
+1108: Level  1 | )}
+1115: Level  0 | }
+Final level: 0

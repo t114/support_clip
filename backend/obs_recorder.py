@@ -406,8 +406,10 @@ def capture_clip(url, start_time, duration, output_path=None, headless=True):
         full_url += f"&reload_id={reload_id}"
             
         # 1. Update OBS internal browser source
-        # Aggressive CSS to make the video player fill the entire 1920x1440 area
+        # Aggressive CSS to make the video player fill the entire 1920x1080 area and hide scrollbars
         custom_css = """
+        body { overflow: hidden !important; }
+        ::-webkit-scrollbar { display: none !important; }
         ytd-app { background: black !important; }
         #masthead-container, #secondary, #comments, #footer, .ytd-merch-shelf-renderer, #chat, #ticket-shelf { display: none !important; }
         .branding-img, .iv-click-target { display: none !important; }
@@ -430,8 +432,8 @@ def capture_clip(url, start_time, duration, output_path=None, headless=True):
         recorder.refresh_source("YouTubeSource")
         
         # Give it a moment to load
-        logger.info("Waiting 7 seconds for OBS internal browser to buffer...")
-        time.sleep(7)
+        logger.info("Waiting 5 seconds for OBS internal browser to buffer...")
+        time.sleep(5)
         
         # 2. Start Recording
         logger.info("Starting OBS recording...")

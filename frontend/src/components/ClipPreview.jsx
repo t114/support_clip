@@ -10,7 +10,7 @@ const getRelativePos = (e, element) => {
     };
 };
 
-function ClipPreview({
+export default function ClipPreview({
     clip,
     videoUrl,
     onUpdate,
@@ -118,10 +118,60 @@ function ClipPreview({
     };
 
     useEffect(() => {
-        if (videoRef.current && videoRef.current.readyState >= 1) {
+        if (videoDims.width && videoDims.height && videoRef.current?.readyState >= 1) {
             handleLoadedMetadata();
         }
     }, [videoUrl]);
+
+    // Update crop rectangles when split_ratio changes in stacked mode
+    useEffect(() => {
+        if (cropMode === 'stacked' && showCrop && cropRect && crop2Rect && !isDragging && !resizeHandle) {
+            const dims = getSafeVideoDims();
+            const videoAspect = dims.width / dims.height;
+
+            const updateRectToAspect = (rect, aspect) => {
+                const K = videoAspect / aspect;
+                let newW = rect.width;
+                let newH = newW * K;
+
+                // If height overflows, scale down width
+                if (newH > 100) {
+                    newH = 100;
+                    newW = newH / K;
+                }
+
+                let newX = rect.x;
+                let newY = rect.y;
+                // Center relative to old center if possible
+                const oldCX = rect.x + rect.width / 2;
+                const oldCY = rect.y + rect.height / 2;
+                newX = Math.max(0, Math.min(100 - newW, oldCX - newW / 2));
+                newY = Math.max(0, Math.min(100 - newH, oldCY - newH / 2));
+
+                return { x: newX, y: newY, width: newW, height: newH };
+            };
+
+            const aspect1 = getTargetAspect(0, 'stacked');
+            const aspect2 = getTargetAspect(1, 'stacked');
+
+            const nextRect1 = updateRectToAspect(cropRect, aspect1);
+            const nextRect2 = updateRectToAspect(crop2Rect, aspect2);
+
+            setCropRect(nextRect1);
+            setCrop2Rect(nextRect2);
+
+            // Update only necessary parts to avoid loop
+            const updated = getUpdatedClipWithCrop(nextRect1, 0, 'stacked', localClip);
+            const finalUpdated = getUpdatedClipWithCrop(nextRect2, 1, 'stacked', updated);
+
+            // Check if actually different to prevent unnecessary updates
+            if (finalUpdated.crop_width !== localClip.crop_width ||
+                finalUpdated.crop2_height !== localClip.crop2_height) {
+                setLocalClip(finalUpdated);
+                onUpdate(finalUpdated);
+            }
+        }
+    }, [localClip.split_ratio, cropMode, showCrop]);
 
     const handleTimeUpdate = () => {
         if (videoRef.current) {
@@ -200,7 +250,17 @@ function ClipPreview({
         return { width: 16, height: 9 }; // Fallback
     };
 
-    const initCropRect = (mode) => {
+    const getTargetAspect = (index, mode, clip = localClip) => {
+        if (mode === 'stacked') {
+            const s_ratio = clip.split_ratio || 0.32;
+            const targetWidth = 720;
+            const targetHeight = index === 0 ? (1280 * s_ratio) : (1280 * (1 - s_ratio));
+            return targetWidth / targetHeight;
+        }
+        return mode === 'horizontal' ? 16 / 9 : 9 / 16;
+    };
+
+    const initCropRect = (mode, baseClip = localClip) => {
         let containerAspect = 16 / 9;
         if (containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
@@ -211,37 +271,33 @@ function ClipPreview({
             containerAspect = videoDims.width / videoDims.height;
         }
 
-        const targetAspect = mode === 'horizontal' ? 16 / 9 : 9 / 16;
-        if (mode === 'letterbox') {
-            setCropRect(null);
-            setCrop2Rect(null);
-            return;
-        }
-
-        const createRect = (yOffset = 0) => {
-            let w, h;
-            if (containerAspect > targetAspect + 0.01) {
-                h = 40; // 40% of height for stacked mode base
-                w = h * (targetAspect / containerAspect);
-            } else {
-                w = 60; // 60% of width
-                h = w * (containerAspect / targetAspect);
-            }
-            const x = (100 - w) / 2;
-            const y = ((100 / (mode === 'stacked' ? 2 : 1)) - h) / 2 + yOffset;
-            return { x, y, width: w, height: h };
-        };
-
         if (mode === 'stacked') {
-            const rect1 = createRect(0);
-            const rect2 = createRect(50);
+            const createRect = (targetAspect, yOffset = 0) => {
+                let w, h;
+                if (containerAspect > targetAspect + 0.01) {
+                    h = 40;
+                    w = h * (targetAspect / containerAspect);
+                } else {
+                    w = 60;
+                    h = w * (containerAspect / targetAspect);
+                }
+                const x = (100 - w) / 2;
+                const y = (50 - h) / 2 + yOffset;
+                return { x, y, width: w, height: h };
+            };
+
+            const rect1 = createRect(getTargetAspect(0, mode, baseClip), 0); // Top: Horizontal
+            const rect2 = createRect(getTargetAspect(1, mode, baseClip), 50); // Bottom: Vertical
             setCropRect(rect1);
             setCrop2Rect(rect2);
-            updateClipCrop(rect1, 0, mode);
-            updateClipCrop(rect2, 1, mode);
-        } else {
-            const newRect = createRect((100 - (containerAspect > targetAspect + 0.01 ? 60 : 80)) / 2); // approximate adjustment
-            // Reset to original logic for single rect
+
+            // Update both in one go to avoid stale state issues
+            let updated = getUpdatedClipWithCrop(rect1, 0, mode, baseClip);
+            updated = getUpdatedClipWithCrop(rect2, 1, mode, updated);
+            setLocalClip(updated);
+            onUpdate(updated);
+        } else if (mode === 'horizontal' || mode === 'vertical') {
+            const targetAspect = getTargetAspect(0, mode, baseClip);
             let w, h;
             if (containerAspect > targetAspect + 0.01) {
                 h = 60;
@@ -256,7 +312,13 @@ function ClipPreview({
 
             setCropRect(finalRect);
             setCrop2Rect(null);
-            updateClipCrop(finalRect, 0, mode);
+
+            const updated = getUpdatedClipWithCrop(finalRect, 0, mode, baseClip);
+            setLocalClip(updated);
+            onUpdate(updated);
+        } else {
+            setCropRect(null);
+            setCrop2Rect(null);
         }
     };
 
@@ -286,13 +348,13 @@ function ClipPreview({
             const updated = {
                 ...localClip,
                 aspect_ratio: 'stacked',
-                split_ratio: localClip.split_ratio || 0.5
+                split_ratio: localClip.split_ratio || 0.32
             };
             setLocalClip(updated);
             onUpdate(updated);
-            initCropRect(mode);
+            initCropRect(mode, updated);
         } else {
-            // Keep aspect_ratio if it's vertical to hint the backend
+            // Keep aspect_ratio if it is vertical to hint the backend
             const updated = { ...localClip };
             if (mode === 'vertical') {
                 updated.aspect_ratio = '9:16';
@@ -306,27 +368,27 @@ function ClipPreview({
             delete updated.split_ratio;
             setLocalClip(updated);
             onUpdate(updated);
-            initCropRect(mode);
+            initCropRect(mode, updated);
         }
     };
 
     // Drag and Resize Implementation
     const [resizeHandle, setResizeHandle] = useState(null); // 'nw', 'ne', 'sw', 'se' or null
 
-    const updateClipCrop = (rect, index = 0, currentMode = cropMode) => {
-        if (currentMode === 'letterbox') return;
+    const getUpdatedClipWithCrop = (rect, index, currentMode, baseClip) => {
+        if (currentMode === 'letterbox') return baseClip;
         const dims = getSafeVideoDims();
-        if (!dims.width || dims.width <= 16) return;
+        if (!dims.width || dims.width <= 16) return baseClip;
 
         // Ensure aspect ratio consistency in output
-        const currentAspect = currentMode === 'horizontal' ? 16 / 9 : 9 / 16;
+        const currentAspect = getTargetAspect(index, currentMode, baseClip);
 
         // Convert percentages to pixels for the video
         let cropW = Math.round((rect.width / 100) * dims.width);
         // Force Height based on Width to ensure strict aspect match (within 1px)
         let cropH = Math.round(cropW / currentAspect);
 
-        // Re-check bounds (if H pushed us out, adjust W instead?) 
+        // Re-check bounds 
         if (cropH > dims.height) {
             cropH = dims.height;
             cropW = Math.round(cropH * currentAspect);
@@ -335,7 +397,7 @@ function ClipPreview({
         const cropX = Math.round((rect.x / 100) * dims.width);
         const cropY = Math.round((rect.y / 100) * dims.height);
 
-        const updated = { ...localClip };
+        const updated = { ...baseClip };
         if (index === 0) {
             updated.crop_x = cropX;
             updated.crop_y = cropY;
@@ -347,7 +409,11 @@ function ClipPreview({
             updated.crop2_width = cropW;
             updated.crop2_height = cropH;
         }
+        return updated;
+    };
 
+    const updateClipCrop = (rect, index = 0, currentMode = cropMode) => {
+        const updated = getUpdatedClipWithCrop(rect, index, currentMode, localClip);
         setLocalClip(updated);
         onUpdate(updated);
     };
@@ -392,7 +458,7 @@ function ClipPreview({
 
                 setRect(currentTargetRect, { x: newX, y: newY });
             } else if (resizeHandle) {
-                const currentAspect = (cropMode === 'horizontal' ? 16 / 9 : 9 / 16);
+                const currentAspect = getTargetAspect(activeCropIndex, cropMode);
                 const dims = getSafeVideoDims();
                 const videoAspect = dims.width && dims.height ? dims.width / dims.height : 16 / 9;
 
@@ -658,10 +724,10 @@ function ClipPreview({
                             </button>
                         )}
                     </div>
-                </div >
+                </div>
 
                 {/* Controls */}
-                < div className="w-full md:w-2/3 space-y-3" >
+                <div className="w-full md:w-2/3 space-y-3" >
                     <div>
                         <label className="block text-sm font-medium text-gray-700">タイトル</label>
                         <input
@@ -773,22 +839,28 @@ function ClipPreview({
                                         <div className="flex flex-col gap-1">
                                             <div className="flex justify-between items-center">
                                                 <span className="text-[10px] uppercase font-bold text-gray-400">上下の分割比率</span>
-                                                <span className="text-xs font-bold text-indigo-600">{((localClip.split_ratio || 0.5) * 100).toFixed(0)}% : {(100 - (localClip.split_ratio || 0.5) * 100).toFixed(0)}%</span>
+                                                <span className="text-xs font-bold text-indigo-600">{((localClip.split_ratio || 0.32) * 100).toFixed(0)}% : {(100 - (localClip.split_ratio || 0.32) * 100).toFixed(0)}%</span>
                                             </div>
                                             <input
                                                 type="range"
                                                 min="0.2"
                                                 max="0.8"
                                                 step="0.05"
-                                                value={localClip.split_ratio || 0.5}
+                                                value={localClip.split_ratio || 0.32}
                                                 onChange={(e) => handleChange('split_ratio', parseFloat(e.target.value))}
                                                 className="w-full h-1 bg-indigo-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                                             />
                                             <div className="flex justify-between text-[8px] text-gray-400">
                                                 <span>上が小さい</span>
+                                                <span className="text-gray-300">|</span>
                                                 <span>中央</span>
+                                                <span className="text-gray-300">|</span>
                                                 <span>上が大きい</span>
                                             </div>
+                                            <p className="text-[8px] text-gray-400 mt-1 leading-tight">
+                                                ※分割比に合わせて、切り抜き枠の形も自動調整されます。<br />
+                                                （16:9に近い枠にするには、スライダーを左側に動かしてください）
+                                            </p>
                                         </div>
                                     </div>
                                 )}
@@ -1092,11 +1164,8 @@ function ClipPreview({
                             )}
                         </button>
                     </div>
-                </div >
-            </div >
-        </div >
+                </div>
+            </div>
+        </div>
     );
 }
-
-export default ClipPreview;
-

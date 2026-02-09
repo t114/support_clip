@@ -1569,6 +1569,7 @@ class ClipRequest(BaseModel):
 @app.post("/youtube/create-clip")
 async def create_clip(request: ClipRequest):
     try:
+        logger.info(f"Create clip request: {request.dict()}")
         video_path = os.path.join(UPLOAD_DIR, request.video_filename)
         if not os.path.exists(video_path):
             raise HTTPException(status_code=404, detail="Video not found")

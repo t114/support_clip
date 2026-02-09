@@ -10,44 +10,26 @@ def capture_and_process_clip(url: str, start: float, end: float, output_path: st
     # Create temp path for raw capture
     raw_path = output_path + ".raw.mkv"
     
-    # Capture
-    # OBS recorder returns the path where it saved the file
-    saved_path = obs_capture(url, start, duration + 5) # Add 5s buffer for loading/seeking
+    # Compensate for OBS browser source loading delay (5s wait in obs_recorder)
+    # Average loading time is ~2s, so we start 5s earlier to land around or before 'start'
+    lead_time = 5
+    capture_start = max(0, start - lead_time)
+    actual_lead = start - capture_start
+    
+    # Capture with lead time and 5s extra buffer at the end
+    saved_path = obs_capture(url, capture_start, duration + actual_lead + 5) 
     
     if not saved_path or not os.path.exists(saved_path):
         raise Exception("OBS Capture failed: No file created")
         
     try:
         # Process the captured file
-        # We assume the captured file content roughly corresponds to the requested start/end.
-        # But there might be a seek delay or loading time captured.
         # The capture_clip function in obs_recorder.py waits 5s for buffering then records.
-        # So the video should start exactly at 'start' (or close to it) if playback started correctly.
-        # We trim the first few seconds if needed? 
-        # Actually obs_recorder logic:
-        # player.play_video(url, start_time)
-        # sleep(5) -> buffering
-        # recorder.start_recording()
-        # So the recording starts 5 seconds AFTER play command.
-        # If video loaded instantly, we missed 5 seconds.
-        # If video took 5 seconds to load, we are at 0.
+        # If loading takes 2s, recording starts exactly at 'capture_start + 3' = 'start - 2'.
+        # We take the whole thing and let extract_clip handle it, 
+        # but we increase the end to ensure we include the requested duration.
         
-        # This timing is tricky.
-        # Better approach:
-        # Start recording immediately.
-        # Play video.
-        # Then we capture everything including loading spinner.
-        # Then we rely on the user to check or we analyze the video to find start?
-        # OR we just try to be loose and say "It includes some buffer".
-        
-        # User said: "標準のyoutubeの画面しかキャプチャできないためそこから、動画再生部分だけを座標指定..."
-        # They want to crop the video player area.
-        
-        # Let's just process whatever we got. 
-        # For now, pass start=0, end=duration to extract_clip?
-        # No, extract_clip cuts. If we pass start=0, end=duration, it takes the first 'duration' seconds.
-        
-        extract_clip(saved_path, 0, duration, output_path, **kwargs)
+        extract_clip(saved_path, 0, duration + actual_lead, output_path, **kwargs)
         
     finally:
         # Cleanup raw capture
@@ -102,19 +84,21 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
             
             # Default split ratio to 0.5 if not provided or invalid
             try:
-                s_ratio = float(split_ratio) if split_ratio is not None else 0.5
+                s_ratio = float(split_ratio) if split_ratio is not None else 0.32
             except:
-                s_ratio = 0.5
+                s_ratio = 0.32
                 
             top_h = int(1280 * s_ratio)
             bottom_h = 1280 - top_h
             
-            # Scale both to width 720 and their respective target heights
-            # Use force_original_aspect_ratio=increase then crop to ensure the area is filled
-            filters.append(f"[0:v]crop={t_w}:{t_h}:{t_x}:{t_y},scale=720:{top_h}:force_original_aspect_ratio=increase,crop=720:{top_h}[top]")
-            filters.append(f"[0:v]crop={b_w}:{b_h}:{b_x}:{b_y},scale=720:{bottom_h}:force_original_aspect_ratio=increase,crop=720:{bottom_h}[bottom]")
+            # Use split to use same input for two different filter paths
+            filters.append(f"{current_v}split=2[v1][v2]")
+            filters.append(f"[v1]crop={t_w}:{t_h}:{t_x}:{t_y},scale=720:{top_h}:force_original_aspect_ratio=increase,crop=720:{top_h}[top]")
+            filters.append(f"[v2]crop={b_w}:{b_h}:{b_x}:{b_y},scale=720:{bottom_h}:force_original_aspect_ratio=increase,crop=720:{bottom_h}[bottom]")
             filters.append(f"[top][bottom]vstack=inputs=2[stacked]")
             current_v = "[stacked]"
+            # Mark that we already converted to final resolution
+            aspect_ratio_processed = True
         elif crop_params:
             x = int(crop_params.get('x', 0))
             y = int(crop_params.get('y', 0))
@@ -123,8 +107,11 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
             if w > 0 and h > 0:
                 filters.append(f"{current_v}crop={w}:{h}:{x}:{y}[cropped]")
                 current_v = "[cropped]"
+            aspect_ratio_processed = False
+        else:
+            aspect_ratio_processed = False
         
-        if aspect_ratio == '9:16':
+        if aspect_ratio == '9:16' and not aspect_ratio_processed:
             # Letterbox to 9:16 (720x1280)
             # Support both string labels and percentage (0-100)
             y_percent = 0.5
