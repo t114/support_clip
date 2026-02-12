@@ -66,6 +66,19 @@ function App() {
       .then(res => res.json())
       .then(data => setSounds(data.sounds || []))
       .catch(err => console.error('Failed to load sounds:', err));
+
+    // Load default style values into state if exists
+    const savedStylesStr = localStorage.getItem('savedStyles');
+    if (defaultName && savedStylesStr) {
+      try {
+        const saved = JSON.parse(savedStylesStr);
+        if (saved[defaultName]) {
+          setStyles(saved[defaultName]);
+        }
+      } catch (e) {
+        console.error('Failed to parse saved styles on mount', e);
+      }
+    }
   }, []);
 
   const handleSaveStyle = (name, styleObj) => {
@@ -115,6 +128,10 @@ function App() {
     setDefaultStyleName(name);
     if (name) {
       localStorage.setItem('defaultStyleName', name);
+      // Load it into current styles as well
+      if (savedStyles[name]) {
+        setStyles(savedStyles[name]);
+      }
     } else {
       localStorage.removeItem('defaultStyleName');
     }
@@ -191,7 +208,7 @@ function App() {
         body: JSON.stringify({
           video_filename: videoData.unique_filename,
           subtitle_content: vttContent,
-          styles: defaultStyle,
+          styles: styles, // Use active editor styles
           saved_styles: savedStyles,
           style_map: subtitles.reduce((acc, sub, index) => {
             if (sub.styleName) {
@@ -330,7 +347,17 @@ function App() {
         {mode === 'emoji' ? (
           <EmojiManager />
         ) : mode === 'youtube' ? (
-          <YouTubeClipCreator />
+          <YouTubeClipCreator
+            subtitles={subtitles}
+            styles={styles}
+            savedStyles={savedStyles}
+            styleMap={subtitles.reduce((acc, sub, index) => {
+              if (sub.styleName) {
+                acc[index] = sub.styleName;
+              }
+              return acc;
+            }, {})}
+          />
         ) : (
           <>
             {status === 'idle' && (

@@ -333,36 +333,39 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         for align, group in by_align.items():
             primary = group[0]
             
-            # Combine all text lines from all overlapping groups
-            all_lines = []
+            # Group events together for combined logic (alignment groups etc)
+            combined_lines_info = []
             for e in group:
                 disp_text = f"{e['prefix']} {e['text']}" if e['prefix'] else e['text']
-                # Split by \N if the original event was already multiline (from VTT)
                 sub_lines = disp_text.split('\\N')
-                all_lines.extend(sub_lines)
+                for sl in sub_lines:
+                    combined_lines_info.append({
+                        "text": sl,
+                        "style_name": e["style_name"],
+                        "has_outer": e["has_outer"],
+                        "font_size": e["font_size"]
+                    })
             
-            line_height = primary['font_size'] * 1.1 # Tighter line height (USER REQUEST: 1.5 -> 1.1)
-            gap = 3 # Slight gap to prevent 1-2px overlap (USER REQUEST: Fix overlap)
+            line_height = primary['font_size'] * 1.1 
+            gap = 3 
             base_v = primary['base_margin_v']
             is_top = (primary['alignment'] in [7, 8, 9])
-            # box_padding not needed for pos calculation if anchors work correctly
             
-            for k, line_text in enumerate(all_lines):
-                # Calculate index related offset
+            for k, info in enumerate(combined_lines_info):
                 if is_top:
                     offset_idx = k
                 else: 
-                    offset_idx = (len(all_lines) - 1) - k
+                    offset_idx = (len(combined_lines_info) - 1) - k
                     
                 final_margin_v = int(base_v + (offset_idx * (line_height + gap)))
                 
                 merged_events.append({
                     "start": t_start,
                     "end": t_end,
-                    "style_name": primary["style_name"],
-                    "has_outer": primary["has_outer"],
-                    "alignment": primary['alignment'], # Store alignment
-                    "line_text": line_text,
+                    "style_name": info["style_name"],
+                    "has_outer": info["has_outer"],
+                    "alignment": primary['alignment'], 
+                    "line_text": info["text"],
                     "margin_v": final_margin_v
                 })
 

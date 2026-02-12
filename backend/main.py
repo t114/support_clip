@@ -1565,6 +1565,11 @@ class ClipRequest(BaseModel):
     aspect_ratio: Optional[str] = None
     letterbox_align: Optional[Any] = 50
     sound_events: Optional[list] = None
+    # Subtitle burning support for clips
+    subtitle_content: Optional[str] = None
+    styles: Optional[dict] = None
+    saved_styles: Optional[dict] = None
+    style_map: Optional[dict] = None
 
 @app.post("/youtube/create-clip")
 async def create_clip(request: ClipRequest):
@@ -1688,6 +1693,43 @@ async def create_clip(request: ClipRequest):
                     emoji_dir=emoji_dir
                 )
 
+        # Generate regular subtitles ASS if requested
+        ass_path = None
+        if request.subtitle_content and request.styles:
+            ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_clip_{safe_title}_subs.ass")
+            
+            # Use same resolution logic as danmaku
+            if request.use_obs_capture:
+                # OBS capture is 1080p
+                output_w, output_h = 1920, 1080
+            else:
+                output_w = analysis_w
+                output_h = analysis_h
+
+            if request.aspect_ratio in ['9:16', 'stacked']:
+                w, h = 720, 1280
+            elif crop_params and crop_params['width'] and crop_params['height']:
+                w, h = int(crop_params['width']), int(crop_params['height'])
+            else:
+                w, h = output_w, output_h
+            
+            # Temporary VTT for this clip
+            temp_vtt = ass_path + ".vtt"
+            with open(temp_vtt, "w", encoding="utf-8") as f_v:
+                f_v.write(request.subtitle_content)
+            
+            generate_ass(
+                temp_vtt,
+                request.styles,
+                ass_path,
+                saved_styles=request.saved_styles,
+                style_map=request.style_map,
+                video_info={"width": w, "height": h}
+            )
+            # Cleanup temp vtt
+            try: os.remove(temp_vtt)
+            except: pass
+
         # Process sound events if provided
         processed_sounds = []
         if request.sound_events:
@@ -1721,6 +1763,7 @@ async def create_clip(request: ClipRequest):
                       crop_params=crop_params,
                       secondary_crop_params=secondary_crop_params,
                       split_ratio=request.split_ratio,
+                      ass_path=ass_path,
                       danmaku_ass_path=danmaku_ass_path,
                       aspect_ratio=request.aspect_ratio,
                       letterbox_align=request.letterbox_align,
@@ -1742,6 +1785,7 @@ async def create_clip(request: ClipRequest):
             crop_params=crop_params, 
             secondary_crop_params=secondary_crop_params,
             split_ratio=request.split_ratio,
+            ass_path=ass_path,
             danmaku_ass_path=danmaku_ass_path, 
             aspect_ratio=request.aspect_ratio,
             letterbox_align=request.letterbox_align,

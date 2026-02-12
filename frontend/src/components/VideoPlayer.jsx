@@ -26,11 +26,7 @@ export default function VideoPlayer({ videoUrl, subtitles, styles, savedStyles, 
         if (sub && sub.styleName && savedStyles && savedStyles[sub.styleName]) {
             return savedStyles[sub.styleName];
         }
-        // If defaultStyleName is set and exists in savedStyles, use it
-        if (defaultStyleName && savedStyles && savedStyles[defaultStyleName]) {
-            return savedStyles[defaultStyleName];
-        }
-        // Otherwise use current styles
+        // Otherwise use current styles (the sliders)
         return styles;
     };
 

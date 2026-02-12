@@ -39,10 +39,11 @@ def capture_and_process_clip(url: str, start: float, end: float, output_path: st
     return output_path
 
 
-def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None, sound_events: list = None, letterbox_align: str = 'center', secondary_crop_params: dict = None, split_ratio: float = 0.5):
+def extract_clip(video_path: str, start: float, end: float, output_path: str, crop_params: dict = None, ass_path: str = None, danmaku_ass_path: str = None, aspect_ratio: str = None, emoji_overlays: list = None, sound_events: list = None, letterbox_align: str = 'center', secondary_crop_params: dict = None, split_ratio: float = 0.5):
     """
     Extracts a clip from the video using ffmpeg.
     crop_params: dict with keys 'x', 'y', 'width', 'height' (optional)
+    ass_path: path to ASS file for regular subtitles (optional)
     danmaku_ass_path: path to ASS file for danmaku comments (optional)
     aspect_ratio: '9:16' for vertical letterbox, 'stacked' for two-screen vertical (optional)
     emoji_overlays: list of dicts with 'path', 'start', 'end', 'x_expr', 'y_pos', 'size' (optional)
@@ -129,10 +130,16 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
             filters.append(f"{current_v}scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:{y_pad}[916]")
             current_v = "[916]"
 
+        if ass_path:
+            # Escape path for ffmpeg filter
+            escaped_ass_path = ass_path.replace("\\", "/").replace(":", "\\:").replace("'", "'\\\\\\''")
+            filters.append(f"{current_v}subtitles='{escaped_ass_path}':fontsdir=/usr/share/fonts/[subt]")
+            current_v = "[subt]"
+
         if danmaku_ass_path:
             # Escape path for ffmpeg filter
-            escaped_ass_path = danmaku_ass_path.replace("\\", "/").replace(":", "\\:").replace("'", "'\\\\\\''")
-            filters.append(f"{current_v}subtitles='{escaped_ass_path}':fontsdir=/usr/share/fonts/[danmaku]")
+            escaped_danmaku_path = danmaku_ass_path.replace("\\", "/").replace(":", "\\:").replace("'", "'\\\\\\''")
+            filters.append(f"{current_v}subtitles='{escaped_danmaku_path}':fontsdir=/usr/share/fonts/[danmaku]")
             current_v = "[danmaku]"
                 
         # Apply emoji overlays using movie filter (avoids Argument list too long)

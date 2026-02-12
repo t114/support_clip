@@ -89,6 +89,8 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                     raise Exception("この動画は利用できません（削除されたか、地域制限されている可能性があります）")
                 elif "age" in error_msg.lower():
                     raise Exception("この動画は年齢制限があるため、ダウンロードできません")
+                elif "This live event has ended" in error_msg:
+                    raise Exception("ライブ配信が終了した直後のため、YouTube側でアーカイブの処理が行われています。数分待ってから再度お試しください。")
                 else:
                     raise Exception(f"ダウンロードエラー: {error_msg}")
             
@@ -205,6 +207,8 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                     raise Exception("この動画は利用できません（削除されたか、地域制限されている可能性があります）")
                 elif "age" in error_msg.lower():
                     raise Exception("この動画は年齢制限があるため、ダウンロードできません")
+                elif "This live event has ended" in error_msg:
+                    raise Exception("ライブ配信が終了した直後のため、YouTube側でアーカイブの処理が行われています。数分待ってから再度お試しください。")
                 else:
                     raise Exception(f"ダウンロードエラー: {error_msg}")
 
@@ -405,8 +409,10 @@ def download_low_quality_for_analysis(url: str, output_dir: str) -> dict:
             try:
                 info = ydl.extract_info(url, download=True)
             except yt_dlp.utils.DownloadError as de:
-                # Handle errors similarly
-                raise Exception(f"Download Error (360p): {de}")
+                error_msg = str(de)
+                if "This live event has ended" in error_msg:
+                    raise Exception("ライブ配信が終了した直後のため、YouTube側でアーカイブの処理が行われています。数分待ってから再度お試しください。")
+                raise Exception(f"Download Error (360p): {error_msg}")
 
             filename = ydl.prepare_filename(info)
             if not os.path.exists(filename):

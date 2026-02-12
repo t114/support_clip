@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import ClipPreview from './ClipPreview';
 import DescriptionModal from './DescriptionModal';
 import TwitterModal from './TwitterModal';
+import { stringifyVTT } from '../utils/vtt';
 
-function YouTubeClipCreator() {
+function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
     const [url, setUrl] = useState('');
     const [modelSize, setModelSize] = useState('none');
     const [analysisMode, setAnalysisMode] = useState(false); // 360p download for analysis
@@ -540,7 +541,11 @@ function YouTubeClipCreator() {
                     danmaku_density: clip.danmaku_density,
                     aspect_ratio: clip.aspect_ratio,
                     letterbox_align: clip.letterbox_align,
-                    use_obs_capture: clip.use_obs_capture // Pass OBS capture flag
+                    use_obs_capture: clip.use_obs_capture,
+                    subtitle_content: subtitles && subtitles.length > 0 ? stringifyVTT(subtitles) : null,
+                    styles: styles,
+                    saved_styles: savedStyles,
+                    style_map: styleMap
                 })
             });
 
