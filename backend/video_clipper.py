@@ -11,8 +11,8 @@ def capture_and_process_clip(url: str, start: float, end: float, output_path: st
     raw_path = output_path + ".raw.mkv"
     
     # Compensate for OBS browser source loading delay (5s wait in obs_recorder)
-    # Average loading time is ~2s, so we start 5s earlier to land around or before 'start'
-    lead_time = 5
+    # Lead time ensures we start BEFORE the target 'start' even with loading delay.
+    lead_time = 10.0
     capture_start = max(0, start - lead_time)
     actual_lead = start - capture_start
     
@@ -23,13 +23,11 @@ def capture_and_process_clip(url: str, start: float, end: float, output_path: st
         raise Exception("OBS Capture failed: No file created")
         
     try:
-        # Process the captured file
         # The capture_clip function in obs_recorder.py waits 5s for buffering then records.
-        # If loading takes 2s, recording starts exactly at 'capture_start + 3' = 'start - 2'.
-        # We take the whole thing and let extract_clip handle it, 
-        # but we increase the end to ensure we include the requested duration.
+        # Fixed logic: Skipping 7s with lead_time=10 hits almost exactly 'start' or 0.5s early.
+        start_offset = 7.0
         
-        extract_clip(saved_path, 0, duration + actual_lead, output_path, **kwargs)
+        extract_clip(saved_path, start_offset, duration + start_offset, output_path, **kwargs)
         
     finally:
         # Cleanup raw capture
@@ -59,7 +57,8 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
         duration = end - start
         
         # Build inputs
-        input_args = ["-ss", str(start), "-i", video_path]
+        # Note: -ss after -i is slower but frame-accurate for output
+        input_args = ["-i", video_path]
         
         # Build audio inputs and filter
         audio_filters = []
@@ -167,6 +166,7 @@ def extract_clip(video_path: str, start: float, end: float, output_path: str, cr
             "ffmpeg",
             "-y",
             *input_args,
+            "-ss", str(start),
             "-t", str(duration)
         ]
 
