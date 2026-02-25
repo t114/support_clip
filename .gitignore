@@ -13,6 +13,8 @@ backend/__pycache__/
 backend/uploads/
 backend/assets/
 backend/yt_data.json
+backend/*.mp4
+backend/*.webm
 *.log
 
 # Frontend
