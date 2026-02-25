@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 
 export default function Upload({ onUploadStart, onUploadSuccess, onUploadError }) {
     const [modelSize, setModelSize] = useState('base');
+    const [maxCharsPerLine, setMaxCharsPerLine] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
 
     const handleDragOver = (e) => {
@@ -38,6 +39,7 @@ export default function Upload({ onUploadStart, onUploadSuccess, onUploadError }
         const formData = new FormData();
         formData.append('file', file);
         formData.append('model_size', modelSize);
+        formData.append('max_chars_per_line', maxCharsPerLine);
 
         try {
             const response = await fetch('/upload', {
@@ -74,21 +76,37 @@ export default function Upload({ onUploadStart, onUploadSuccess, onUploadError }
                     ここに動画をドラッグ＆ドロップするか、クリックして選択してください
                 </p>
 
-                <div className="flex justify-center items-center gap-2 mt-4">
-                    <label className="text-sm text-gray-600">モデル:</label>
-                    <select
-                        value={modelSize}
-                        onChange={(e) => setModelSize(e.target.value)}
-                        className="p-1 border rounded bg-white text-sm"
-                        onClick={(e) => e.stopPropagation()} // Prevent triggering drop zone click
-                    >
-                        <option value="none">none (文字起こししない)</option>
-                        <option value="tiny">tiny (最速・低精度)</option>
-                        <option value="base">base (推奨・バランス)</option>
-                        <option value="small">small (高精度・遅い)</option>
-                        <option value="medium">medium (超高精度・激遅)</option>
-                        <option value="large">large (最高精度・激重)</option>
-                    </select>
+                <div className="flex justify-center items-center gap-4 mt-4 flex-wrap">
+                    <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">モデル:</label>
+                        <select
+                            value={modelSize}
+                            onChange={(e) => setModelSize(e.target.value)}
+                            className="p-1 border rounded bg-white text-sm"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <option value="none">none (文字起こししない)</option>
+                            <option value="tiny">tiny (最速・低精度)</option>
+                            <option value="base">base (推奨・バランス)</option>
+                            <option value="small">small (高精度・遅い)</option>
+                            <option value="medium">medium (超高精度・激遅)</option>
+                            <option value="large">large (最高精度・激重)</option>
+                        </select>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">1行の最大文字数:</label>
+                        <input
+                            type="number"
+                            min="0"
+                            value={maxCharsPerLine}
+                            onChange={(e) => setMaxCharsPerLine(parseInt(e.target.value) || 0)}
+                            className="w-16 p-1 border rounded bg-white text-sm"
+                            placeholder="無制限"
+                            title="1つの字幕に含める最大文字数。0の場合は制限なし。"
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                    </div>
                 </div>
 
                 <input

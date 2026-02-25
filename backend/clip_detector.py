@@ -930,7 +930,7 @@ def count_comments_in_clips(clips: list, comments_path: str) -> list:
         traceback.print_exc()
         return clips
 
-def detect_emoji_density_clips(comments_path: str, video_duration: float, category: str = "kusa", custom_patterns: list = None, clip_duration: int = 60) -> list:
+def detect_emoji_density_clips(comments_path: str, video_duration: float, category: str = "kusa", custom_patterns: list = None, clip_duration: int = 60, start_time: float = 0) -> list:
     """
     Detects clips based on specific emoji/pattern density in comments.
     
@@ -1013,7 +1013,8 @@ def detect_emoji_density_clips(comments_path: str, video_duration: float, catego
                                             if found: count += 1
                                             
                         if count > 0:
-                            events.append((timestamp, count))
+                            if timestamp >= start_time:
+                                events.append((timestamp, count))
                     except: continue
         else:
             # info.json fallback
@@ -1030,7 +1031,8 @@ def detect_emoji_density_clips(comments_path: str, video_duration: float, catego
                     import re
                     count += len(re.findall(rp, text))
                 if count > 0:
-                    events.append((float(timestamp), count))
+                    if timestamp >= start_time:
+                        events.append((float(timestamp), count))
 
         if not events: return []
 
@@ -1068,7 +1070,7 @@ def detect_kusa_emoji_clips(comments_path: str, video_duration: float, clip_dura
 
 
 
-def detect_comment_density_clips(comments_path: str, video_duration: float, clip_duration: int = 60) -> list:
+def detect_comment_density_clips(comments_path: str, video_duration: float, clip_duration: int = 60, start_time: float = 0) -> list:
     """
     Detects clips based on comment density (total number of comments per minute).
     Analyzes 1-minute windows and returns top 10 clips with highest comment count.
@@ -1118,7 +1120,8 @@ def detect_comment_density_clips(comments_path: str, video_duration: float, clip
                                        'liveChatPaidMessageRenderer' in item or \
                                        'liveChatPaidStickerRenderer' in item or \
                                        'liveChatMembershipItemRenderer' in item:
-                                        comment_events.append(timestamp)
+                                        if timestamp >= start_time:
+                                            comment_events.append(timestamp)
                                         break  # Only count once per action
 
                     except Exception as e:
@@ -1144,7 +1147,8 @@ def detect_comment_density_clips(comments_path: str, video_duration: float, clip
                     timestamp = float(c['offset_seconds'])
 
                 if timestamp is not None:
-                    comment_events.append(timestamp)
+                    if timestamp >= start_time:
+                        comment_events.append(timestamp)
 
         if not comment_events:
             print("[COMMENT_DENSITY] No comments found")

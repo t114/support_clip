@@ -7,7 +7,7 @@ import uuid
 import requests
 import datetime
 from .transcribe import transcribe_video
-from .youtube_downloader import download_youtube_video, download_low_quality_for_analysis
+from .youtube_downloader import download_youtube_video, download_low_quality_for_analysis, extract_video_id
 from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality, count_comments_in_clips, detect_kusa_emoji_clips, detect_comment_density_clips, detect_emoji_density_clips
 from .video_clipper import extract_clip, merge_clips, capture_and_process_clip
 from .config import DEFAULT_MAX_CLIPS
@@ -55,7 +55,8 @@ logger = logging.getLogger(__name__)
 @app.post("/upload")
 async def upload_video(
     file: UploadFile = File(...),
-    model_size: str = Form("base")
+    model_size: str = Form("base"),
+    max_chars_per_line: int = Form(0)
 ):
     try:
         # Generate unique filename
@@ -86,7 +87,7 @@ async def upload_video(
 
         # Transcribe
         # Note: In a real app, this should be a background task
-        vtt_path = transcribe_video(file_path, model_size=model_size)
+        vtt_path = transcribe_video(file_path, model_size=model_size, max_chars_per_line=max_chars_per_line)
 
         # Return URLs relative to the static mount
         srt_path = vtt_path.replace('.vtt', '.srt')
@@ -861,6 +862,7 @@ class YouTubeDownloadRequest(BaseModel):
     with_comments: bool = False
     model_size: str = "base"
     analysis_mode: bool = False
+    max_chars_per_line: int = 0
 
 from .progress import update_progress, get_progress, clear_progress
 
@@ -923,8 +925,8 @@ def download_youtube(request: YouTubeDownloadRequest):
         else:
             # with_commentsフラグを渡す
             video_info = download_youtube_video(request.url, UPLOAD_DIR, download_comments=request.with_comments)
-        video_path = video_info["file_path"]
-        real_video_id = video_info["id"]
+        video_path = video_info.get("file_path")
+        real_video_id = video_info.get("id", "unknown")
         
         # Update video_id if we guessed wrong (though usually regex is fine)
         if real_video_id != video_id:
@@ -934,74 +936,84 @@ def download_youtube(request: YouTubeDownloadRequest):
         
         is_cached = video_info.get("cached", False)
         
-        if is_cached:
-            logger.info(f"Video is cached, checking for transcription files...")
-        
-        # 文字起こしファイルのキャッシュ確認
-        # 動画IDベースのファイル名を使用
-        base_name = os.path.splitext(os.path.basename(video_path))[0]
-        vtt_filename = f"{base_name}.vtt"
-        vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
-        srt_filename = f"{base_name}.srt"
-        srt_path = os.path.join(UPLOAD_DIR, srt_filename)
-        
-        # VTTファイルが存在しない場合のみ文字起こし実行
-        # model_size が "none" の場合は文字起こしをスキップ
-        if request.model_size == "none":
-            logger.info(f"Skipping transcription (model_size=none)")
-            update_progress(video_id, "completed", 100, "文字起こしをスキップしました（字幕ファイルをアップロードしてください）")
-            # VTTとSRTのパスを空にする
-            vtt_path = None
-            srt_path = None
-        elif not os.path.exists(vtt_path):
-            logger.info(f"Transcribing video: {video_path}")
-            update_progress(video_id, "transcribing", 0, "文字起こし準備中...")
-
-            def progress_callback(percent):
-                update_progress(video_id, "transcribing", percent, f"文字起こし中... {int(percent)}%")
-
-            vtt_path = transcribe_video(video_path, progress_callback=progress_callback, model_size=request.model_size)
-            srt_path = vtt_path.replace('.vtt', '.srt')
-
-            update_progress(video_id, "transcribing", 100, "文字起こし完了")
-        else:
-            logger.info(f"Using cached transcription: {vtt_path}")
-            update_progress(video_id, "completed", 100, "キャッシュを使用中")
-        
-        # Generate FCPXML (only if VTT exists)
+        # 文字起こし・FCPXMLの初期化
+        vtt_path = None
+        srt_path = None
         fcpxml_filename = None
-        fcpxml_path = None
+        base_name = None
 
-        if vtt_path:
-            from .transcribe import parse_vtt_file
-            segments = parse_vtt_file(vtt_path)
+        if video_path:
+            logger.info(f"Video downloaded/cached: {video_path}")
+            if is_cached:
+                logger.info(f"Video is cached, checking for transcription files...")
+            
+            # 文字起こしファイルのキャッシュ確認
+            # 動画IDベースのファイル名を使用
+            base_name = os.path.splitext(os.path.basename(video_path))[0]
+            vtt_filename = f"{base_name}.vtt"
+            vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
+            srt_filename = f"{base_name}.srt"
+            srt_path = os.path.join(UPLOAD_DIR, srt_filename)
+            
+            # VTTファイルが存在しない場合のみ文字起こし実行
+            # model_size が "none" の場合は文字起こしをスキップ
+            if request.model_size == "none":
+                logger.info(f"Skipping transcription (model_size=none)")
+                update_progress(video_id, "completed", 100, "文字起こしをスキップしました（字幕ファイルをアップロードしてください）")
+                # VTTとSRTのパスを空にする
+                vtt_path = None
+                srt_path = None
+            elif not os.path.exists(vtt_path):
+                logger.info(f"Transcribing video: {video_path}")
+                update_progress(video_id, "transcribing", 0, "文字起こし準備中...")
 
-            # FCPXMLのキャッシュ確認
-            fcpxml_filename = f"{base_name}.fcpxml"
-            fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
+                def progress_callback(percent):
+                    update_progress(video_id, "transcribing", percent, f"文字起こし中... {int(percent)}%")
 
-            if not os.path.exists(fcpxml_path):
-                logger.info(f"Generating FCPXML: {fcpxml_path}")
-                # video_info already has duration but maybe not fps in the format we want?
-                # youtube_downloader might return info.
-                # Let's use get_video_info to be consistent and accurate with file on disk.
-                video_meta = get_video_info(video_path)
-                generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
+                vtt_path = transcribe_video(
+                    video_path, 
+                    progress_callback=progress_callback, 
+                    model_size=request.model_size,
+                    max_chars_per_line=request.max_chars_per_line
+                )
+                srt_path = vtt_path.replace('.vtt', '.srt')
+
+                update_progress(video_id, "transcribing", 100, "文字起こし完了")
             else:
-                logger.info(f"Using cached FCPXML: {fcpxml_path}")
+                logger.info(f"Using cached transcription: {vtt_path}")
+                update_progress(video_id, "completed", 100, "キャッシュを使用中")
+            
+            # Generate FCPXML (only if VTT exists)
+            if vtt_path:
+                from .transcribe import parse_vtt_file
+                segments = parse_vtt_file(vtt_path)
+
+                # FCPXMLのキャッシュ確認
+                fcpxml_filename = f"{base_name}.fcpxml"
+                fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
+
+                if not os.path.exists(fcpxml_path):
+                    logger.info(f"Generating FCPXML: {fcpxml_path}")
+                    video_meta = get_video_info(video_path)
+                    generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
+                else:
+                    logger.info(f"Using cached FCPXML: {fcpxml_path}")
+        else:
+            logger.info("Video is processing (live event ended just now). Metadata only mode.")
+            update_progress(video_id, "completed", 100, "アーカイブ処理待ち（OBSキャプチャが可能です）")
         
         update_progress(video_id, "completed", 100, "処理完了")
 
         response_data = {
-            "video_url": f"/static/{os.path.basename(video_path)}",
+            "video_url": f"/static/{os.path.basename(video_path)}" if video_path else None,
             "subtitle_url": f"/static/{os.path.basename(vtt_path)}" if vtt_path else None,
             "srt_url": f"/static/{os.path.basename(srt_path)}" if srt_path else None,
             "fcpxml_url": f"/static/{fcpxml_filename}" if fcpxml_filename else None,
-            "filename": os.path.basename(video_path),
+            "filename": os.path.basename(video_path) if video_path else None,
             "video_info": video_info,
             "start_time": video_info.get("start_time", 0),
             "cached": is_cached,
-            "has_comments": video_info.get("comments_file") is not None or os.path.exists(os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")) or os.path.exists(os.path.join(UPLOAD_DIR, f"{base_name}.info.json"))
+            "has_comments": video_info.get("comments_file") is not None or (base_name and (os.path.exists(os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")) or os.path.exists(os.path.join(UPLOAD_DIR, f"{base_name}.info.json"))))
         }
 
         logger.info(f"[YOUTUBE_DOWNLOAD] Returning response for {video_id}: {response_data.keys()}")
@@ -1103,12 +1115,22 @@ async def analyze_video(request: AnalyzeRequest):
         video_duration = max([seg['end'] for seg in segments]) if segments else 0
         print(f"Video duration: {video_duration:.1f}s")
 
+        # Find the correct starting offset if start_time is provided and we are at offset 0
+        if request.start_time > 0 and offset == 0:
+            for idx, seg in enumerate(segments):
+                if seg['start'] >= request.start_time:
+                    offset = idx
+                    print(f"Jumping to segment offset {offset} due to start_time {request.start_time}s")
+                    break
+            else:
+                raise HTTPException(status_code=400, detail=f"No segments found after start_time={request.start_time}s")
+
         # Get the chunk to analyze
         end_index = min(offset + CHUNK_SIZE, total_segments)
         segments_chunk = segments[offset:end_index]
 
         print(f"Analyzing segments {offset}-{end_index} of {total_segments}")
-
+        
         # Find the video file from VTT filename
         # VTT files are named the same as video files (e.g., video.mp4 -> video.vtt)
         base_path = os.path.splitext(vtt_path)[0]
@@ -1123,17 +1145,6 @@ async def analyze_video(request: AnalyzeRequest):
 
         if not video_path:
             raise HTTPException(status_code=404, detail="Video file not found")
-
-        # Filter segments by start_time if specified
-        if request.start_time > 0:
-            segments_chunk = [
-                seg for seg in segments_chunk
-                if seg['start'] >= request.start_time
-            ]
-            print(f"Filtered to {len(segments_chunk)} segments after start_time={request.start_time}s")
-        
-        if not segments_chunk:
-            raise HTTPException(status_code=400, detail=f"No segments found after start_time={request.start_time}s")
 
         # Analyze with hybrid detection (silence + sentence boundaries)
         clips = detect_boundaries_hybrid(video_path, segments_chunk, request.max_clips, request.start_time)
@@ -1190,6 +1201,7 @@ class AnalyzeStampsRequest(BaseModel):
     category: Optional[str] = "kusa" # "kusa", "kawaii", or None
     custom_patterns: Optional[list] = None
     clip_duration: int = 60
+    start_time: float = 0
 
 class TopStampsRequest(BaseModel):
     vtt_filename: Optional[str] = None
@@ -1268,7 +1280,8 @@ async def analyze_stamps_clips(request: AnalyzeStampsRequest):
             video_duration=video_duration,
             category=request.category,
             custom_patterns=custom_patterns,
-            clip_duration=request.clip_duration
+            clip_duration=request.clip_duration,
+            start_time=request.start_time
         )
 
         return {
@@ -1358,6 +1371,7 @@ class AnalyzeKusaRequest(BaseModel):
     vtt_filename: Optional[str] = None
     video_filename: Optional[str] = None
     clip_duration: int = 60
+    start_time: float = 0
 
 @app.post("/youtube/analyze-kusa")
 async def analyze_kusa_clips(request: AnalyzeKusaRequest):
@@ -1366,13 +1380,15 @@ async def analyze_kusa_clips(request: AnalyzeKusaRequest):
         vtt_filename=request.vtt_filename,
         video_filename=request.video_filename,
         category="kusa",
-        clip_duration=request.clip_duration
+        clip_duration=request.clip_duration,
+        start_time=request.start_time
     ))
 
 class AnalyzeCommentDensityRequest(BaseModel):
     vtt_filename: Optional[str] = None
     video_filename: Optional[str] = None
     clip_duration: int = 60  # 1-minute clips by default
+    start_time: float = 0
 
 @app.post("/youtube/analyze-comment-density")
 async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
@@ -1430,7 +1446,8 @@ async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
         clips = detect_comment_density_clips(
             comments_path=comments_path,
             video_duration=video_duration,
-            clip_duration=request.clip_duration
+            clip_duration=request.clip_duration,
+            start_time=request.start_time
         )
 
         if not clips:
@@ -1546,7 +1563,8 @@ async def upload_subtitle(
         raise HTTPException(status_code=500, detail=str(e))
 
 class ClipRequest(BaseModel):
-    video_filename: str
+    video_filename: Optional[str] = None
+    url: Optional[str] = None
     start: float
     end: float
     title: str
@@ -1575,22 +1593,33 @@ class ClipRequest(BaseModel):
 async def create_clip(request: ClipRequest):
     try:
         logger.info(f"Create clip request: {request.dict()}")
-        video_path = os.path.join(UPLOAD_DIR, request.video_filename)
-        if not os.path.exists(video_path):
-            raise HTTPException(status_code=404, detail="Video not found")
+        video_path = os.path.join(UPLOAD_DIR, request.video_filename) if request.video_filename else None
+        
+        # If OBS capture is requested, we might not have a local video file yet (e.g. archive processing)
+        if not request.use_obs_capture:
+            if not video_path or not os.path.exists(video_path):
+                raise HTTPException(status_code=404, detail="Video not found and direct extraction requested")
+        elif not video_path or not os.path.exists(video_path):
+            if not request.url:
+                 raise HTTPException(status_code=404, detail="Video not found and no YouTube URL provided for OBS capture")
+            logger.info(f"Local video not found, but OBS capture requested for URL: {request.url}")
 
-        base_name = os.path.splitext(request.video_filename)[0]
+        base_name = os.path.splitext(request.video_filename)[0] if request.video_filename else (extract_video_id(request.url) if request.url else "clip")
         safe_title = "".join([c for c in request.title if c.isalnum() or c in (' ', '-', '_')]).strip()
         output_filename = f"{base_name}_clip_{safe_title}.mp4"
         output_path = os.path.join(UPLOAD_DIR, output_filename)
 
         crop_params = None
         if request.crop_width is not None and request.crop_height is not None:
-            # Scale coordinates if this is a low-res analysis video being captured via 1080p OBS
-            from .video_processing import get_video_info
-            v_info_analysis = get_video_info(video_path)
-            analysis_w = v_info_analysis.get('width', 1920) or 1920
-            analysis_h = v_info_analysis.get('height', 1080) or 1080
+            if video_path and os.path.exists(video_path):
+                from .video_processing import get_video_info
+                v_info_analysis = get_video_info(video_path)
+                analysis_w = v_info_analysis.get('width', 1920) or 1920
+                analysis_h = v_info_analysis.get('height', 1080) or 1080
+            else:
+                # If no video path, assume 1080p target (OBS default)
+                analysis_w = 1920
+                analysis_h = 1080
             
             scale_x = 1.0
             scale_y = 1.0
@@ -1612,10 +1641,15 @@ async def create_clip(request: ClipRequest):
             # We already have scale_x/scale_y from analysis_w/h above if crop_params was set
             # But let's make it robust in case only crop2 is set (though unlikely)
             if 'scale_x' not in locals():
-                from .video_processing import get_video_info
-                v_info_analysis = get_video_info(video_path)
-                analysis_w = v_info_analysis.get('width', 1920) or 1920
-                analysis_h = v_info_analysis.get('height', 1080) or 1080
+                if video_path and os.path.exists(video_path):
+                    from .video_processing import get_video_info
+                    v_info_analysis = get_video_info(video_path)
+                    analysis_w = v_info_analysis.get('width', 1920) or 1920
+                    analysis_h = v_info_analysis.get('height', 1080) or 1080
+                else:
+                    analysis_w = 1920
+                    analysis_h = 1080
+                
                 scale_x = 1.0
                 scale_y = 1.0
                 if request.use_obs_capture and analysis_w < 1920:
@@ -1741,17 +1775,18 @@ async def create_clip(request: ClipRequest):
                     })
 
         if request.use_obs_capture:
-            # Needs URL from info.json
-            info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
-            url = None
-            if os.path.exists(info_file):
-                 try:
-                     with open(info_file, 'r') as f:
-                          info = json.load(f)
-                          url = info.get('webpage_url') or info.get('original_url')
-                          if not url and info.get('id'):
-                               url = f"https://www.youtube.com/watch?v={info.get('id')}"
-                 except: pass
+            url = request.url
+            if not url:
+                # Needs URL from info.json
+                info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+                if os.path.exists(info_file):
+                     try:
+                         with open(info_file, 'r') as f:
+                              info = json.load(f)
+                              url = info.get('webpage_url') or info.get('original_url')
+                              if not url and info.get('id'):
+                                   url = f"https://www.youtube.com/watch?v={info.get('id')}"
+                     except: pass
             
             if url:
                  print(f"Using OBS Capture for clip from {url}")

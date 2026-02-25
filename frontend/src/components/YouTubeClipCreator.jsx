@@ -25,6 +25,7 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
     const [startTime, setStartTime] = useState(0);
     const [withComments, setWithComments] = useState(false);
     const [danmakuDensity, setDanmakuDensity] = useState(10); // 0 to 100%
+    const [maxCharsPerLine, setMaxCharsPerLine] = useState(0);
 
     // Description modal state
     const [isDescriptionModalOpen, setIsDescriptionModalOpen] = useState(false);
@@ -93,6 +94,16 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
             // 数値のみの場合（秒）
             if (/^\d+$/.test(t)) {
                 return parseInt(t);
+            }
+
+            // コロン形式の場合 (例: 1:02:03 や 05:30)
+            if (t.includes(':')) {
+                const parts = t.split(':').map(p => parseInt(p) || 0);
+                if (parts.length === 3) {
+                    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+                } else if (parts.length === 2) {
+                    return parts[0] * 60 + parts[1];
+                }
             }
 
             // h/m/s形式の場合
@@ -191,7 +202,8 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                     url: trimmedUrl,
                     with_comments: withComments,
                     model_size: modelSize,
-                    analysis_mode: analysisMode
+                    analysis_mode: analysisMode,
+                    max_chars_per_line: maxCharsPerLine
                 })
             });
 
@@ -227,15 +239,29 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                 setVttFilename(data.subtitle_url.split('/').pop());
             }
 
-            // バックエンドから返されたstart_timeを使用（URLから抽出済み）
-            if (data.start_time !== undefined && data.start_time > 0) {
-                setStartTime(data.start_time);
-            }
-
-            // Reset analysis state
             setClips([]);
             setAnalysisOffset(0);
             setHasMore(false);
+
+            // Set start_time from backend (derived from URL)
+            let currentStartTime = 0;
+            if (data.start_time !== undefined && data.start_time > 0) {
+                setStartTime(data.start_time);
+                currentStartTime = data.start_time;
+            }
+
+            // Automatically add a clip at start_time if provided
+            if (currentStartTime > 0) {
+                const duration = 180; // 3 minutes as requested by user's context
+                const urlClip = {
+                    id: Date.now() + 1000,
+                    start: currentStartTime,
+                    end: currentStartTime + duration,
+                    title: 'URL指定の箇所',
+                    reason: 'URLの開始時間より作成'
+                };
+                setClips([urlClip]);
+            }
 
             // 字幕がない場合（文字起こしをスキップした場合）
             if (!data.subtitle_url) {
@@ -335,7 +361,8 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                     video_filename: videoInfo?.filename,
                     category: category,
                     custom_patterns: customPattern ? [customPattern] : null,
-                    clip_duration: 60
+                    clip_duration: 60,
+                    start_time: startTime
                 })
             });
 
@@ -397,7 +424,8 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                 body: JSON.stringify({
                     vtt_filename: vttFilename,
                     video_filename: videoInfo?.filename,
-                    clip_duration: 60
+                    clip_duration: 60,
+                    start_time: startTime
                 })
             });
 
@@ -542,6 +570,7 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                     aspect_ratio: clip.aspect_ratio,
                     letterbox_align: clip.letterbox_align,
                     use_obs_capture: clip.use_obs_capture,
+                    url: url,
                     subtitle_content: subtitles && subtitles.length > 0 ? stringifyVTT(subtitles) : null,
                     styles: styles,
                     saved_styles: savedStyles,
@@ -606,7 +635,21 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                     </button>
                 </div>
 
-                <div className="mb-2 mt-2">
+                <div className="flex gap-4 mt-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">文字数制限:</label>
+                        <input
+                            type="number"
+                            min="0"
+                            value={maxCharsPerLine}
+                            onChange={(e) => setMaxCharsPerLine(parseInt(e.target.value) || 0)}
+                            className="w-16 p-1 border rounded bg-white text-sm"
+                            placeholder="無制限"
+                            title="1つの字幕に含める最大文字数。0の場合は制限なし。"
+                        />
+                        <span className="text-xs text-gray-500">(0で無制限)</span>
+                    </div>
+
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                         <input
                             type="checkbox"
@@ -615,7 +658,7 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                             disabled={status === 'downloading'}
                             className="rounded border-gray-300 text-red-600 focus:ring-red-500"
                         />
-                        <span>分析モードでダウンロード (360p/高速) - クリップ作成時にOBSで高画質キャプチャします</span>
+                        <span>分析モード (360p)</span>
                     </label>
                 </div>
 

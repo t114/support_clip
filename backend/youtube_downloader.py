@@ -29,6 +29,14 @@ def extract_start_time_from_url(url: str) -> int:
             if t_value.isdigit():
                 return int(t_value)
             
+            # Check for colon format like 1:02:03 or 02:03
+            if ':' in t_value:
+                parts = t_value.split(':')
+                if len(parts) == 3: # H:M:S
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                elif len(parts) == 2: # M:S
+                    return int(parts[0]) * 60 + int(parts[1])
+            
             # h/m/s形式の場合
             hours = re.search(r'(\d+)h', t_value)
             minutes = re.search(r'(\d+)m', t_value)
@@ -90,7 +98,20 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                 elif "age" in error_msg.lower():
                     raise Exception("この動画は年齢制限があるため、ダウンロードできません")
                 elif "This live event has ended" in error_msg:
-                    raise Exception("ライブ配信が終了した直後のため、YouTube側でアーカイブの処理が行われています。数分待ってから再度お試しください。")
+                    video_id = extract_video_id(url)
+                    return {
+                        "file_path": None,
+                        "title": "アーカイブ処理中 (YouTube)",
+                        "duration": 0,
+                        "thumbnail": "",
+                        "id": video_id,
+                        "filename": None,
+                        "start_time": extract_start_time_from_url(url),
+                        "cached": False,
+                        "comments_file": None,
+                        "is_processing": True,
+                        "url": url
+                    }
                 else:
                     raise Exception(f"ダウンロードエラー: {error_msg}")
             
@@ -208,7 +229,20 @@ def download_youtube_video(url: str, output_dir: str, download_comments: bool = 
                 elif "age" in error_msg.lower():
                     raise Exception("この動画は年齢制限があるため、ダウンロードできません")
                 elif "This live event has ended" in error_msg:
-                    raise Exception("ライブ配信が終了した直後のため、YouTube側でアーカイブの処理が行われています。数分待ってから再度お試しください。")
+                    video_id = extract_video_id(url)
+                    return {
+                        "file_path": None,
+                        "title": "アーカイブ処理中 (YouTube)",
+                        "duration": 0,
+                        "thumbnail": "",
+                        "id": video_id,
+                        "filename": None,
+                        "start_time": extract_start_time_from_url(url),
+                        "cached": False,
+                        "comments_file": None,
+                        "is_processing": True,
+                        "url": url
+                    }
                 else:
                     raise Exception(f"ダウンロードエラー: {error_msg}")
 
@@ -411,7 +445,20 @@ def download_low_quality_for_analysis(url: str, output_dir: str) -> dict:
             except yt_dlp.utils.DownloadError as de:
                 error_msg = str(de)
                 if "This live event has ended" in error_msg:
-                    raise Exception("ライブ配信が終了した直後のため、YouTube側でアーカイブの処理が行われています。数分待ってから再度お試しください。")
+                    video_id = extract_video_id(url)
+                    return {
+                        "file_path": None,
+                        "title": "アーカイブ処理中 (YouTube)",
+                        "duration": 0,
+                        "thumbnail": "",
+                        "id": video_id,
+                        "filename": None,
+                        "start_time": extract_start_time_from_url(url),
+                        "cached": False,
+                        "comments_file": None,
+                        "is_processing": True,
+                        "url": url
+                    }
                 raise Exception(f"Download Error (360p): {error_msg}")
 
             filename = ydl.prepare_filename(info)

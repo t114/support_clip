@@ -333,6 +333,34 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
                     </div>
                 </div>
 
+                <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                        フォント透過率（文字・影・縁取り）
+                        <span className="ml-2 text-xs text-gray-500">
+                            ※ 背景色の透過率とは別です
+                        </span>
+                    </label>
+                    <div className="flex items-center space-x-3">
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={styles.fontOpacity !== undefined ? styles.fontOpacity : 100}
+                            onChange={(e) => handleChange('fontOpacity', Number(e.target.value))}
+                            className="flex-1"
+                        />
+                        <span className="text-sm font-bold w-12 text-right"
+                            style={{ color: (styles.fontOpacity !== undefined ? styles.fontOpacity : 100) < 50 ? '#ef4444' : '#374151' }}
+                        >
+                            {styles.fontOpacity !== undefined ? styles.fontOpacity : 100}%
+                        </span>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-400 mt-0.5">
+                        <span>完全透明</span>
+                        <span>不透明（デフォルト）</span>
+                    </div>
+                </div>
+
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">背景色・透明度</label>
                     <div className="space-y-2">

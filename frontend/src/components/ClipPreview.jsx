@@ -29,6 +29,7 @@ export default function ClipPreview({
     const videoRef = useRef(null);
     const containerRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
+    const [isPlayingEnd, setIsPlayingEnd] = useState(false); // 末尾プレビュー中フラグ
     const [localClip, setLocalClip] = useState(clip);
     const [currentTime, setCurrentTime] = useState(0);
     const [showDanmaku, setShowDanmaku] = useState(true);
@@ -180,6 +181,7 @@ export default function ClipPreview({
             if (currentTime >= localClip.end) {
                 videoRef.current.pause();
                 setIsPlaying(false);
+                setIsPlayingEnd(false);
                 videoRef.current.currentTime = localClip.start;
             }
         }
@@ -196,6 +198,18 @@ export default function ClipPreview({
             videoRef.current.currentTime = localClip.start;
             videoRef.current.play();
             setIsPlaying(true);
+            setIsPlayingEnd(false);
+        }
+    };
+
+    // 末尾10秒プレビュー
+    const playEndPreview = () => {
+        if (videoRef.current) {
+            const previewStart = Math.max(localClip.start, localClip.end - 10);
+            videoRef.current.currentTime = previewStart;
+            videoRef.current.play();
+            setIsPlaying(true);
+            setIsPlayingEnd(true);
         }
     };
 
@@ -203,11 +217,19 @@ export default function ClipPreview({
         if (videoRef.current) {
             videoRef.current.pause();
             setIsPlaying(false);
+            setIsPlayingEnd(false);
         }
     };
 
     const handleChange = (field, value) => {
         const updated = { ...localClip, [field]: value };
+        setLocalClip(updated);
+        onUpdate(updated);
+    };
+
+    const updateStartTime = (newStart) => {
+        const duration = Math.max(0, localClip.end - localClip.start);
+        const updated = { ...localClip, start: newStart, end: newStart + duration };
         setLocalClip(updated);
         onUpdate(updated);
     };
@@ -700,19 +722,36 @@ export default function ClipPreview({
 
                     {/* Time Display */}
                     <div className="absolute top-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs font-mono z-10">
+                        {isPlayingEnd && (
+                            <span className="text-yellow-300 mr-1">⏩末尾</span>
+                        )}
                         {formatTime(currentTime)} / {formatTime(localClip.end - localClip.start)}
                     </div>
                     <div className="absolute bottom-2 right-2 flex space-x-2 z-10">
                         {!isPlaying ? (
-                            <button
-                                onClick={playPreview}
-                                className="bg-blue-600 text-white p-1 rounded-full hover:bg-blue-700"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                            </button>
+                            <>
+                                {/* 末尾10秒プレビューボタン */}
+                                <button
+                                    onClick={playEndPreview}
+                                    title={`末尾10秒をプレビュー (${formatTime(Math.max(0, localClip.end - localClip.start - 10))} 〜 ${formatTime(localClip.end - localClip.start)})`}
+                                    className="bg-yellow-500 text-white p-1 rounded-full hover:bg-yellow-600 flex items-center gap-0.5"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                                {/* 通常プレビューボタン */}
+                                <button
+                                    onClick={playPreview}
+                                    title="最初からプレビュー"
+                                    className="bg-blue-600 text-white p-1 rounded-full hover:bg-blue-700"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </button>
+                            </>
                         ) : (
                             <button
                                 onClick={stopPreview}
@@ -919,7 +958,7 @@ export default function ClipPreview({
                                         const hours = parseInt(e.target.value) || 0;
                                         const minutes = Math.floor((localClip.start % 3600) / 60);
                                         const seconds = Math.floor(localClip.start % 60);
-                                        handleChange('start', hours * 3600 + minutes * 60 + seconds);
+                                        updateStartTime(hours * 3600 + minutes * 60 + seconds);
                                     }}
                                     min="0"
                                     className="w-14 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border p-1.5"
@@ -933,7 +972,7 @@ export default function ClipPreview({
                                         const hours = Math.floor(localClip.start / 3600);
                                         const minutes = parseInt(e.target.value) || 0;
                                         const seconds = Math.floor(localClip.start % 60);
-                                        handleChange('start', hours * 3600 + minutes * 60 + seconds);
+                                        updateStartTime(hours * 3600 + minutes * 60 + seconds);
                                     }}
                                     min="0"
                                     max="59"
@@ -948,7 +987,7 @@ export default function ClipPreview({
                                         const hours = Math.floor(localClip.start / 3600);
                                         const minutes = Math.floor((localClip.start % 3600) / 60);
                                         const seconds = parseInt(e.target.value) || 0;
-                                        handleChange('start', hours * 3600 + minutes * 60 + Math.min(59, seconds));
+                                        updateStartTime(hours * 3600 + minutes * 60 + Math.min(59, seconds));
                                     }}
                                     min="0"
                                     max="59"
@@ -1166,6 +1205,6 @@ export default function ClipPreview({
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

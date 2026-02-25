@@ -76,19 +76,44 @@ def generate_ass(vtt_path, styles, output_path, saved_styles=None, style_map=Non
         
         bold = -1 if font_weight == 'bold' else 0
         
-        primary_color = hex_to_ass_color(style_obj.get('color', '#ffffff'))
+        # fontOpacity: 0=completely transparent, 100=opaque (default)
+        # ASS alpha: 0x00=opaque, 0xFF=transparent
+        font_opacity_pct = style_obj.get('fontOpacity', 100)
+        font_alpha = int((1.0 - (font_opacity_pct / 100.0)) * 255)
+        font_alpha = max(0, min(255, font_alpha))
+
+        def apply_font_alpha(ass_color_str, alpha_override):
+            """Replace the alpha bytes in an ASS color string &HAABBGGRR."""
+            # ass_color_str is like '&H00RRGGBB' or '&HAABBGGRR'
+            # Format: &H + AA + BB + GG + RR (8 hex chars)
+            prefix = '&H'
+            body = ass_color_str[2:]  # strip '&H'
+            # Keep BGR, override AA
+            bgr = body[2:]  # last 6 chars = BBGGRR
+            return f"{prefix}{alpha_override:02X}{bgr}"
+        
+        primary_color_base = hex_to_ass_color(style_obj.get('color', '#ffffff'))
+        outline_color_base = hex_to_ass_color(style_obj.get('outlineColor', '#000000'))
+        outer_outline_color_base = hex_to_ass_color(style_obj.get('outerOutlineColor', '#ffffff'))
+        shadow_color_base = hex_to_ass_color(style_obj.get('shadowColor', '#000000'))
         back_color = hex_to_ass_color(style_obj.get('backgroundColor', '#00000080'))
-        outline_color = hex_to_ass_color(style_obj.get('outlineColor', '#000000'))
+
+        # Apply font alpha override (only if < 100%)
+        if font_alpha > 0:
+            primary_color = apply_font_alpha(primary_color_base, font_alpha)
+            outline_color = apply_font_alpha(outline_color_base, font_alpha)
+            outer_outline_color = apply_font_alpha(outer_outline_color_base, font_alpha)
+            shadow_color = apply_font_alpha(shadow_color_base, font_alpha)
+        else:
+            primary_color = primary_color_base
+            outline_color = outline_color_base
+            outer_outline_color = outer_outline_color_base
+            shadow_color = shadow_color_base
+
         outline_width = int(style_obj.get('outlineWidth', 0) * 1.5)
-        
-        # New: Outer outline and shadow
-        outer_outline_color = hex_to_ass_color(style_obj.get('outerOutlineColor', '#ffffff'))
         outer_outline_width = int(style_obj.get('outerOutlineWidth', 0) * 1.5)
-        shadow_color = hex_to_ass_color(style_obj.get('shadowColor', '#000000'))
         shadow_blur = int(style_obj.get('shadowBlur', 0) * 1.5)
-        # shadow_offset_x = int(style_obj.get('shadowOffsetX', 0) * 1.5) # Not used in standard ASS Style format directly
-        # shadow_offset_y = int(style_obj.get('shadowOffsetY', 0) * 1.5)
-        
+
         # MarginV calculation (approximate)
         # ASS uses numpad layout: 1-9 corresponding to screen positions
         alignment_map = {

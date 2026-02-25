@@ -394,6 +394,13 @@ def capture_clip(url, start_time, duration, output_path=None, headless=True):
     try:
         # Use the original URL directly with timestamp as embed conversion might be failing
         # Most YouTube URLs (watch, live, etc.) support the t= seconds parameter.
+        # Strip existing t parameter if present to avoid conflicts
+        # Handles formats like t=123, t=123s, t=1h2m3s
+        url = re.sub(r'[?&]t=[0-9hms]+', '', url)
+        # Also clean up any trailing ? or &
+        if url.endswith('?') or url.endswith('&'):
+            url = url[:-1]
+
         t_param = f"t={int(start_time)}s"
         
         if "?" in url:
@@ -407,22 +414,88 @@ def capture_clip(url, start_time, duration, output_path=None, headless=True):
             
         # 1. Update OBS internal browser source
         # Aggressive CSS to make the video player fill the entire 1920x1080 area and hide scrollbars
+        # Updated for YouTube's latest DOM structure changes (2025-2026)
         custom_css = """
-        body { overflow: hidden !important; }
+        * { box-sizing: border-box !important; }
+        html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: black !important; width: 100vw !important; height: 100vh !important; }
         ::-webkit-scrollbar { display: none !important; }
-        ytd-app { background: black !important; }
-        #masthead-container, #secondary, #comments, #footer, .ytd-merch-shelf-renderer, #chat, #ticket-shelf { display: none !important; }
-        .branding-img, .iv-click-target { display: none !important; }
-        ytd-watch-flexy { --ytd-watch-flexy-sidebar-width: 0px !important; --ytd-watch-flexy-max-player-width: 100% !important; margin: 0 !important; padding: 0 !important; }
-        #primary.ytd-watch-flexy { padding: 0 !important; margin: 0 !important; max-width: none !important; width: 100% !important; }
-        #player-container-outer, #player-container-inner, #player-container, #ytd-player { 
-            width: 100vw !important; height: 100vh !important; 
-            max-width: none !important; max-height: none !important;
-            padding: 0 !important; margin: 0 !important;
+
+        /* Hide everything except the player */
+        #masthead-container, ytd-masthead, #header, #appbar,
+        #secondary, #secondary-inner,
+        #comments, #comment-teaser,
+        #footer, ytd-footer-renderer,
+        #chat, ytd-live-chat-frame,
+        #ticket-shelf, ytd-merch-shelf-renderer,
+        ytd-watch-next-secondary-results-renderer,
+        ytd-playlist-panel-renderer,
+        tp-yt-app-drawer, ytd-mini-guide-renderer,
+        ytd-guide-renderer, #guide,
+        #related, .ytd-watch-flexy[is-two-columns_],
+        ytd-endscreen-element-renderer,
+        .ytp-endscreen-content,
+        .iv-branding, .iv-click-target,
+        .ytp-cards-teaser,
+        .annotation { display: none !important; }
+
+        /* Hide player controls (bottom bar) */
+        .ytp-chrome-bottom,
+        .ytp-gradient-bottom,
+        .ytp-title-channel,
+        .ytp-chrome-top { opacity: 0 !important; pointer-events: none !important; }
+
+        /* Make ytd-app / page-manager take full screen */
+        ytd-app { background: black !important; min-height: 100vh !important; }
+        ytd-page-manager { margin-top: 0 !important; padding-top: 0 !important; }
+
+        /* Watch page layout: force full-width single-column */
+        ytd-watch-flexy,
+        ytd-watch-flexy[flexy_],
+        ytd-watch-flexy[flexy_][flexy-full-window_] {
+            --ytd-watch-flexy-sidebar-width: 0px !important;
+            --ytd-watch-flexy-max-player-width: 100vw !important;
+            --ytd-watch-flexy-player-min-height: 100vh !important;
+            min-height: 100vh !important;
+            margin: 0 !important;
+            padding: 0 !important;
         }
-        #movie_player, .html5-video-container, video { width: 100% !important; height: 100% !important; top: 0 !important; left: 0 !important; }
-        ytd-page-manager { margin-top: 0 !important; }
-        .ytp-chrome-bottom { opacity: 0 !important; } /* Hide controls voluntarily if they appear */
+        #columns.ytd-watch-flexy { margin: 0 !important; padding: 0 !important; }
+        #primary.ytd-watch-flexy { padding: 0 !important; margin: 0 !important; max-width: none !important; width: 100vw !important; min-width: 100vw !important; }
+
+        /* Player containers - cascade through all wrapper divs */
+        #player,
+        #player-container,
+        #player-container-outer,
+        #player-container-inner,
+        #ytd-player,
+        ytd-player,
+        .ytd-player {
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            max-height: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            z-index: 9999 !important;
+        }
+
+        /* The actual YT movie player and its direct children */
+        #movie_player,
+        .html5-video-player,
+        .html5-video-container,
+        video.html5-main-video {
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            max-height: none !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            background: black !important;
+        }
         """
         logger.info(f"Updating OBS 'YouTubeSource' URL to: {full_url}")
         # Set resolution back to 1920x1080 but with better CSS
