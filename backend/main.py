@@ -1609,26 +1609,25 @@ async def create_clip(request: ClipRequest):
         output_filename = f"{base_name}_clip_{safe_title}.mp4"
         output_path = os.path.join(UPLOAD_DIR, output_filename)
 
+        # Initialize base resolution for overlays and cropping
+        analysis_w = 1920
+        analysis_h = 1080
+        if video_path and os.path.exists(video_path):
+            from .video_processing import get_video_info
+            v_info_analysis = get_video_info(video_path)
+            analysis_w = v_info_analysis.get('width', 1920) or 1920
+            analysis_h = v_info_analysis.get('height', 1080) or 1080
+
+        # Calculate scaling for OBS capture if needed
+        scale_x = 1.0
+        scale_y = 1.0
+        if request.use_obs_capture and analysis_w < 1920:
+            scale_x = 1920 / analysis_w
+            scale_y = 1080 / analysis_h
+            logger.info(f"Scaling crop coordinates for OBS capture: {scale_x}x")
+
         crop_params = None
         if request.crop_width is not None and request.crop_height is not None:
-            if video_path and os.path.exists(video_path):
-                from .video_processing import get_video_info
-                v_info_analysis = get_video_info(video_path)
-                analysis_w = v_info_analysis.get('width', 1920) or 1920
-                analysis_h = v_info_analysis.get('height', 1080) or 1080
-            else:
-                # If no video path, assume 1080p target (OBS default)
-                analysis_w = 1920
-                analysis_h = 1080
-            
-            scale_x = 1.0
-            scale_y = 1.0
-            
-            if request.use_obs_capture and analysis_w < 1920:
-                scale_x = 1920 / analysis_w
-                scale_y = 1080 / analysis_h
-                logger.info(f"Scaling crop coordinates for OBS capture: {scale_x}x")
-
             crop_params = {
                 'x': (request.crop_x or 0) * scale_x,
                 'y': (request.crop_y or 0) * scale_y,
@@ -1638,24 +1637,6 @@ async def create_clip(request: ClipRequest):
 
         secondary_crop_params = None
         if request.crop2_width is not None and request.crop2_height is not None:
-            # We already have scale_x/scale_y from analysis_w/h above if crop_params was set
-            # But let's make it robust in case only crop2 is set (though unlikely)
-            if 'scale_x' not in locals():
-                if video_path and os.path.exists(video_path):
-                    from .video_processing import get_video_info
-                    v_info_analysis = get_video_info(video_path)
-                    analysis_w = v_info_analysis.get('width', 1920) or 1920
-                    analysis_h = v_info_analysis.get('height', 1080) or 1080
-                else:
-                    analysis_w = 1920
-                    analysis_h = 1080
-                
-                scale_x = 1.0
-                scale_y = 1.0
-                if request.use_obs_capture and analysis_w < 1920:
-                    scale_x = 1920 / analysis_w
-                    scale_y = 1080 / analysis_h
-                
             secondary_crop_params = {
                 'x': (request.crop2_x or 0) * scale_x,
                 'y': (request.crop2_y or 0) * scale_y,
@@ -1683,7 +1664,7 @@ async def create_clip(request: ClipRequest):
                 
                 # Detect the intended final resolution for overlays
                 if request.use_obs_capture:
-                    # OBS capture is 1080p
+                    # OBS capture is 1080p (1920x1080)
                     output_w, output_h = 1920, 1080
                 else:
                     output_w = analysis_w
@@ -1734,7 +1715,7 @@ async def create_clip(request: ClipRequest):
             
             # Use same resolution logic as danmaku
             if request.use_obs_capture:
-                # OBS capture is 1080p
+                # OBS capture is 1080p (1920x1080)
                 output_w, output_h = 1920, 1080
             else:
                 output_w = analysis_w
@@ -1787,30 +1768,49 @@ async def create_clip(request: ClipRequest):
                               if not url and info.get('id'):
                                    url = f"https://www.youtube.com/watch?v={info.get('id')}"
                      except: pass
-            
+
             if url:
                  print(f"Using OBS Capture for clip from {url}")
-                 output_path = capture_and_process_clip(
-                      url,
-                      request.start,
-                      request.end,
-                      output_path,
-                      crop_params=crop_params,
-                      secondary_crop_params=secondary_crop_params,
-                      split_ratio=request.split_ratio,
-                      ass_path=ass_path,
-                      danmaku_ass_path=danmaku_ass_path,
-                      aspect_ratio=request.aspect_ratio,
-                      letterbox_align=request.letterbox_align,
-                      emoji_overlays=emoji_overlays,
-                      sound_events=processed_sounds
-                 )
-                 return {
-                     "video_url": f"/static/{output_filename}",
-                     "filename": output_filename
-                 }
+                 try:
+                     output_path = capture_and_process_clip(
+                          url,
+                          request.start,
+                          request.end,
+                          output_path,
+                          crop_params=crop_params,
+                          secondary_crop_params=secondary_crop_params,
+                          split_ratio=request.split_ratio,
+                          ass_path=ass_path,
+                          danmaku_ass_path=danmaku_ass_path,
+                          aspect_ratio=request.aspect_ratio,
+                          letterbox_align=request.letterbox_align,
+                          emoji_overlays=emoji_overlays,
+                          sound_events=processed_sounds
+                     )
+                     return {
+                         "video_url": f"/static/{output_filename}",
+                         "filename": output_filename
+                     }
+                 except (ConnectionRefusedError, OSError) as obs_err:
+                     logger.error(f"OBS connection failed: {obs_err}")
+                     raise HTTPException(
+                         status_code=503,
+                         detail="OBSに接続できませんでした。OBS Studioを起動し、WebSocketサーバー（ポート4455）が有効になっているか確認してください。"
+                     )
+                 except Exception as obs_err:
+                     err_msg = str(obs_err)
+                     if "Connection refused" in err_msg or "111" in err_msg or "websocket" in err_msg.lower():
+                         logger.error(f"OBS capture failed: {obs_err}")
+                         raise HTTPException(
+                             status_code=503,
+                             detail="OBSに接続できませんでした。OBS Studioを起動し、WebSocketサーバー（ポート4455）が有効になっているか確認してください。"
+                         )
+                     raise
             else:
-                 print("Warning: use_obs_capture requested but URL not found. Falling back to ffmpeg.")
+                 raise HTTPException(
+                     status_code=400,
+                     detail="OBSキャプチャが要求されましたが、YouTube URLが見つかりませんでした。"
+                 )
 
         output_path = extract_clip(
             video_path, 

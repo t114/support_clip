@@ -75,7 +75,7 @@ os.environ['MOZ_HEADLESS'] = "1"
 logger.info("Enabled MOZ_HEADLESS=1 for Firefox")
 
 class OBSRecorder:
-    def __init__(self, host='localhost', port=4455, password='natsu@pass0001'):
+    def __init__(self, host='localhost', port=4455, password=''):
         self.host = host
         self.port = port
         self.password = password
