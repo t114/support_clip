@@ -15,6 +15,71 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
         }
     };
 
+    const handleExportStyles = async () => {
+        try {
+            const stylesData = JSON.parse(localStorage.getItem('savedStyles') || '{}');
+            const defaultStyleNameData = localStorage.getItem('defaultStyleName') || null;
+            const recentStyleNamesData = JSON.parse(localStorage.getItem('recentStyleNames') || '[]');
+            
+            const payload = {
+                styles: stylesData,
+                defaultStyleName: defaultStyleNameData,
+                recentStyleNames: recentStyleNamesData
+            };
+            
+            const res = await fetch('/api/styles/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!res.ok) throw new Error('エクスポートに失敗しました');
+            
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'styles_export.zip';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (e) {
+            alert(e.message);
+        }
+    };
+
+    const handleImportStyles = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const res = await fetch('/api/styles/import', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!res.ok) throw new Error('インポートに失敗しました');
+            const result = await res.json();
+            const { styles: impStyles, defaultStyleName: impDef, recentStyleNames: impRec } = result.data;
+            
+            if (impStyles) localStorage.setItem('savedStyles', JSON.stringify(impStyles));
+            if (impDef) localStorage.setItem('defaultStyleName', impDef);
+            if (impRec) localStorage.setItem('recentStyleNames', JSON.stringify(impRec));
+            
+            alert('スタイルのインポートが完了しました。ページを再読み込みします。');
+            window.location.reload();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            e.target.value = '';
+        }
+    };
+
+
     // Helper to get hex and alpha from #RRGGBBAA
     const getHexAndAlpha = (color) => {
         if (!color) return { hex: '#000000', alpha: 128 };
@@ -40,7 +105,24 @@ export default function StyleEditor({ styles, onStyleChange, savedStyles, onSave
 
     return (
         <div className="bg-white p-4 rounded-lg shadow space-y-4">
-            <h3 className="font-bold text-gray-700">字幕スタイル</h3>
+            <div className="flex justify-between items-center mb-2">
+                <h3 className="font-bold text-gray-700">字幕スタイル</h3>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => document.getElementById('style-import').click()}
+                        className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 transition font-medium shadow-sm"
+                    >
+                        インポート (ZIP)
+                    </button>
+                    <input type="file" id="style-import" accept=".zip" onChange={handleImportStyles} className="hidden" />
+                    <button
+                        onClick={handleExportStyles}
+                        className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded hover:bg-gray-700 transition font-medium shadow-sm"
+                    >
+                        エクスポート (ZIP)
+                    </button>
+                </div>
+            </div>
 
             {/* スタイル保存・読み込み */}
             <div className="bg-gray-50 p-3 rounded border border-gray-200 mb-4">
