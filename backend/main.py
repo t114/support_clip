@@ -611,6 +611,62 @@ async def get_common_emojis():
     common = refresh_common_emojis_cache()
     return {"common": common}
 
+@app.get("/api/emojis/export")
+async def export_emojis():
+    """Export all emojis and configurations as a ZIP file"""
+    import zipfile
+    import tempfile
+    
+    try:
+        if not os.path.exists(EMOJIS_DIR):
+            raise HTTPException(status_code=404, detail="No emojis found")
+            
+        zip_path = os.path.join(tempfile.gettempdir(), "emojis_export.zip")
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(EMOJIS_DIR):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, EMOJIS_DIR)
+                    zipf.write(file_path, arcname)
+                    
+        return FileResponse(
+            path=zip_path,
+            filename="emojis_export.zip",
+            media_type="application/zip",
+            background=None
+        )
+    except Exception as e:
+        logger.error(f"Error exporting emojis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/emojis/import")
+async def import_emojis(file: UploadFile = File(...)):
+    """Import emojis and configurations from a ZIP file"""
+    import zipfile
+    import tempfile
+    
+    try:
+        if not file.filename.endswith('.zip'):
+            raise HTTPException(status_code=400, detail="Must be a ZIP file")
+            
+        zip_path = os.path.join(tempfile.gettempdir(), "emojis_import.zip")
+        with open(zip_path, "wb") as f:
+            f.write(await file.read())
+            
+        os.makedirs(EMOJIS_DIR, exist_ok=True)
+        
+        with zipfile.ZipFile(zip_path, 'r') as zipf:
+            zipf.extractall(EMOJIS_DIR)
+            
+        refresh_common_emojis_cache()
+        refresh_channels_summary_cache()
+        
+        return {"status": "success", "message": "Emojis imported successfully"}
+    except Exception as e:
+        logger.error(f"Error importing emojis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/emojis/{channel_id}")
 async def get_emoji_details(channel_id: str):
     """Get all emoji details for a specific channel"""
@@ -689,61 +745,6 @@ async def delete_emojis(channel_id: str):
         return {"status": "success", "message": f"Deleted emojis for {channel_id}"}
     except Exception as e:
         logger.error(f"Error deleting emojis for {channel_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/emojis/export")
-async def export_emojis():
-    """Export all emojis and configurations as a ZIP file"""
-    import zipfile
-    import tempfile
-    
-    try:
-        if not os.path.exists(EMOJIS_DIR):
-            raise HTTPException(status_code=404, detail="No emojis found")
-            
-        zip_path = os.path.join(tempfile.gettempdir(), "emojis_export.zip")
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(EMOJIS_DIR):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, EMOJIS_DIR)
-                    zipf.write(file_path, arcname)
-                    
-        return FileResponse(
-            path=zip_path,
-            filename="emojis_export.zip",
-            media_type="application/zip",
-            background=None
-        )
-    except Exception as e:
-        logger.error(f"Error exporting emojis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/emojis/import")
-async def import_emojis(file: UploadFile = File(...)):
-    """Import emojis and configurations from a ZIP file"""
-    import zipfile
-    import tempfile
-    
-    try:
-        if not file.filename.endswith('.zip'):
-            raise HTTPException(status_code=400, detail="Must be a ZIP file")
-            
-        zip_path = os.path.join(tempfile.gettempdir(), "emojis_import.zip")
-        with open(zip_path, "wb") as f:
-            f.write(await file.read())
-            
-        os.makedirs(EMOJIS_DIR, exist_ok=True)
-        
-        with zipfile.ZipFile(zip_path, 'r') as zipf:
-            zipf.extractall(EMOJIS_DIR)
-            
-        refresh_common_emojis_cache()
-        refresh_channels_summary_cache()
-        
-        return {"status": "success", "message": "Emojis imported successfully"}
-    except Exception as e:
-        logger.error(f"Error importing emojis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
