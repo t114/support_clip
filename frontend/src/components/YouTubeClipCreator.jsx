@@ -1030,12 +1030,20 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                                             コメント量で解析
                                         </button>
                                         <button
-                                            onClick={analyzeKusaClips}
+                                            onClick={() => handleAnalyzeStamps('kusa')}
                                             className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 flex items-center gap-1"
                                             title="コメント内の草絵文字の使用頻度で切り抜き候補を検出"
                                         >
                                             <span>🌱</span>
                                             草絵文字で解析
+                                        </button>
+                                        <button
+                                            onClick={() => handleAnalyzeStamps('kawaii')}
+                                            className="bg-pink-500 text-white px-4 py-2 rounded hover:bg-pink-600 flex items-center gap-1"
+                                            title="コメント内のカワイイ絵文字/単語の使用頻度で切り抜き候補を検出"
+                                        >
+                                            <span>💕</span>
+                                            カワイイで解析
                                         </button>
                                     </>
                                 )}
