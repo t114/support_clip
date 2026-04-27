@@ -7,6 +7,10 @@ import { stringifyVTT } from '../utils/vtt';
 function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
     const [url, setUrl] = useState('');
     const [modelSize, setModelSize] = useState('none');
+    const [externalTranscribeUrl, setExternalTranscribeUrl] = useState('http://192.168.1.203:8000/v1/audio/transcriptions');
+    const [ollamaHost, setOllamaHost] = useState('http://192.168.1.203:11434');
+    const [ollamaModel, setOllamaModel] = useState('gemma2:9b');
+    const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
     const [analysisMode, setAnalysisMode] = useState(false); // 360p download for analysis
     const [status, setStatus] = useState('idle'); // idle, downloading, analyzing, ready
     const [videoInfo, setVideoInfo] = useState(null);
@@ -203,7 +207,8 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                     with_comments: withComments,
                     model_size: modelSize,
                     analysis_mode: analysisMode,
-                    max_chars_per_line: maxCharsPerLine
+                    max_chars_per_line: maxCharsPerLine,
+                    external_transcribe_url: externalTranscribeUrl
                 })
             });
 
@@ -306,7 +311,9 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                     vtt_filename: vttFile,
                     max_clips: 5,
                     offset: offset,
-                    start_time: startTime
+                    start_time: startTime,
+                    ollama_host: ollamaHost,
+                    ollama_model: ollamaModel
                 })
             });
 
@@ -625,6 +632,7 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                         <option value="small">small (高精度・遅い)</option>
                         <option value="medium">medium (超高精度・激遅)</option>
                         <option value="large">large (最高精度・激重)</option>
+                        <option value="external">外部サーバー (API)</option>
                     </select>
                     <button
                         onClick={handleDownload}
@@ -633,6 +641,51 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                     >
                         {status === 'downloading' ? '処理中...' : '開始'}
                     </button>
+                </div>
+
+                <div className="mt-2 mb-4">
+                    <button 
+                        onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                        className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${showAdvancedSettings ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                        外部AI・詳細設定
+                    </button>
+                    {showAdvancedSettings && (
+                        <div className="mt-2 p-3 bg-gray-50 rounded border text-sm space-y-3">
+                            {modelSize === 'external' && (
+                                <div className="flex flex-col gap-1">
+                                    <label className="font-medium text-gray-700">外部文字起こし API URL (OpenAI互換)</label>
+                                    <input 
+                                        type="text" 
+                                        value={externalTranscribeUrl} 
+                                        onChange={(e) => setExternalTranscribeUrl(e.target.value)} 
+                                        className="p-1.5 border rounded w-full bg-white"
+                                    />
+                                </div>
+                            )}
+                            <div className="flex flex-col gap-1">
+                                <label className="font-medium text-gray-700">AI解析用 Ollama ホスト</label>
+                                <input 
+                                    type="text" 
+                                    value={ollamaHost} 
+                                    onChange={(e) => setOllamaHost(e.target.value)} 
+                                    className="p-1.5 border rounded w-full bg-white"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="font-medium text-gray-700">AI解析用 モデル名 (Ollama)</label>
+                                <input 
+                                    type="text" 
+                                    value={ollamaModel} 
+                                    onChange={(e) => setOllamaModel(e.target.value)} 
+                                    className="p-1.5 border rounded w-full bg-white"
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex gap-4 mt-2 flex-wrap">

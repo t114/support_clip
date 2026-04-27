@@ -919,6 +919,7 @@ class YouTubeDownloadRequest(BaseModel):
     model_size: str = "base"
     analysis_mode: bool = False
     max_chars_per_line: int = 0
+    external_transcribe_url: Optional[str] = None
 
 from .progress import update_progress, get_progress, clear_progress
 
@@ -1030,7 +1031,8 @@ def download_youtube(request: YouTubeDownloadRequest):
                     video_path, 
                     progress_callback=progress_callback, 
                     model_size=request.model_size,
-                    max_chars_per_line=request.max_chars_per_line
+                    max_chars_per_line=request.max_chars_per_line,
+                    external_url=request.external_transcribe_url
                 )
                 srt_path = vtt_path.replace('.vtt', '.srt')
 
@@ -1089,6 +1091,8 @@ class AnalyzeRequest(BaseModel):
     max_clips: int = DEFAULT_MAX_CLIPS
     offset: int = 0  # Starting segment index
     start_time: float = 0  # 解析開始時刻（秒）
+    ollama_host: Optional[str] = None
+    ollama_model: Optional[str] = None
 
 @app.post("/youtube/analyze")
 async def analyze_video(request: AnalyzeRequest):
@@ -1229,7 +1233,11 @@ async def analyze_video(request: AnalyzeRequest):
         print(f"Evaluating {len(clips)} clips...")
         for clip in clips:
             try:
-                evaluation = evaluate_clip_quality(vtt_path, clip['start'], clip['end'])
+                evaluation = evaluate_clip_quality(
+                    vtt_path, clip['start'], clip['end'],
+                    ollama_host=request.ollama_host,
+                    ollama_model=request.ollama_model
+                )
                 clip['evaluation_score'] = evaluation['score']
                 clip['evaluation_reason'] = evaluation['reason']
                 print(f"Evaluated clip {clip['start']:.1f}-{clip['end']:.1f}: {evaluation['score']}/5 - {evaluation['reason']}")

@@ -1,5 +1,7 @@
 from faster_whisper import WhisperModel
 import os
+import requests
+import subprocess
 
 # Load the model globally to avoid reloading it for every request
 # Using 'base' for faster processing speed (good balance of speed and accuracy)
@@ -72,7 +74,7 @@ def create_srt_content(segments) -> str:
         
     return "\n".join(srt_output)
 
-def transcribe_video(video_path: str, progress_callback=None, model_size: str = "base", max_chars_per_line: int = 0) -> str:
+def transcribe_video(video_path: str, progress_callback=None, model_size: str = "base", max_chars_per_line: int = 0, external_url: str = None) -> str:
     """
     Transcribes the video and returns the path to the generated VTT file.
     Also generates an SRT file in the same location.
@@ -80,27 +82,13 @@ def transcribe_video(video_path: str, progress_callback=None, model_size: str = 
     Args:
         video_path: Path to the video file
         progress_callback: Optional function(progress_percent: float) to call during transcription
-        model_size: Whisper model size (tiny, base, small, medium, large)
+        model_size: Whisper model size (tiny, base, small, medium, large, external)
         max_chars_per_line: Maximum characters per subtitle line. If > 0, long segments will be split.
+        external_url: URL for external API if model_size is 'external'
     """
     print(f"Transcribing {video_path} using model '{model_size}' (max_chars={max_chars_per_line})...")
     
-    model = get_model(model_size)
-    
-    # Use word_timestamps only if splitting is requested to avoid overhead, 
-    # though it's generally useful.
-    word_ts = max_chars_per_line > 0
-    
-    # faster-whisper returns a generator of segments
-    segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=word_ts)
-    
-    print(f"Detected language '{info.language}' with probability {info.language_probability}")
-    
-    # Convert generator to list to process segments and log progress
     segments_list = []
-    
-    # Estimate total duration for progress calculation if possible
-    total_duration = info.duration
     
     class SimpleSegment:
         def __init__(self, start, end, text):
@@ -108,60 +96,118 @@ def transcribe_video(video_path: str, progress_callback=None, model_size: str = 
             self.end = end
             self.text = text
 
-    for i, segment in enumerate(segments):
-        # Calculate progress
-        if total_duration and total_duration > 0:
-            progress = min(99, (segment.end / total_duration) * 100)
+    if model_size == "external" and external_url:
+        print(f"Using external API for transcription: {external_url}")
+        audio_path = video_path + ".wav"
+        try:
             if progress_callback:
-                progress_callback(progress)
-        
-        # Check if we need to split this segment
-        text = segment.text.strip()
-        if max_chars_per_line > 0 and len(text) > max_chars_per_line:
-            if word_ts and hasattr(segment, 'words') and segment.words:
-                # Precise splitting using word timestamps
-                current_words = []
-                current_len = 0
-                for word in segment.words:
-                    w_text = word.word.strip()
-                    if not w_text:
-                        continue
+                progress_callback(10)
+            
+            subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if progress_callback:
+                progress_callback(30)
+                
+            with open(audio_path, "rb") as f:
+                response = requests.post(
+                    external_url,
+                    files={"file": (os.path.basename(audio_path), f, "audio/wav")},
+                    data={"model": "whisper-1", "response_format": "verbose_json"},
+                    timeout=600
+                )
+                
+                if response.status_code != 200:
+                    raise Exception(f"External API error ({response.status_code}): {response.text}")
                     
-                    if current_len + len(w_text) > max_chars_per_line and current_words:
-                        # Flush current group
+                result = response.json()
+                
+                raw_segments = []
+                if "segments" in result:
+                    for seg in result["segments"]:
+                        raw_segments.append(SimpleSegment(seg["start"], seg["end"], seg["text"]))
+                else:
+                    raw_segments.append(SimpleSegment(0, 0, result.get("text", "")))
+                
+                # Apply max_chars_per_line split logic
+                for i, segment in enumerate(raw_segments):
+                    text = segment.text.strip()
+                    if max_chars_per_line > 0 and len(text) > max_chars_per_line:
+                        num_splits = (len(text) + max_chars_per_line - 1) // max_chars_per_line
+                        duration = segment.end - segment.start
+                        for s in range(num_splits):
+                            part_text = text[s*max_chars_per_line : (s+1)*max_chars_per_line]
+                            part_start = segment.start + (s / num_splits) * duration
+                            part_end = segment.start + ((s + 1) / num_splits) * duration
+                            segments_list.append(SimpleSegment(part_start, part_end, part_text))
+                    else:
+                        segments_list.append(segment)
+                    
+        finally:
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+                
+        if progress_callback:
+            progress_callback(100)
+            
+    else:
+        model = get_model(model_size)
+        
+        word_ts = max_chars_per_line > 0
+        segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=word_ts)
+        
+        print(f"Detected language '{info.language}' with probability {info.language_probability}")
+        
+        total_duration = info.duration
+
+        for i, segment in enumerate(segments):
+            if total_duration and total_duration > 0:
+                progress = min(99, (segment.end / total_duration) * 100)
+                if progress_callback:
+                    progress_callback(progress)
+            
+            text = segment.text.strip()
+            if max_chars_per_line > 0 and len(text) > max_chars_per_line:
+                if word_ts and hasattr(segment, 'words') and segment.words:
+                    current_words = []
+                    current_len = 0
+                    for word in segment.words:
+                        w_text = word.word.strip()
+                        if not w_text:
+                            continue
+                        
+                        if current_len + len(w_text) > max_chars_per_line and current_words:
+                            s_start = current_words[0].start
+                            s_end = current_words[-1].end
+                            s_text = "".join([w.word for w in current_words]).strip()
+                            segments_list.append(SimpleSegment(s_start, s_end, s_text))
+                            
+                            current_words = []
+                            current_len = 0
+                        
+                        current_words.append(word)
+                        current_len += len(w_text)
+                    
+                    if current_words:
                         s_start = current_words[0].start
                         s_end = current_words[-1].end
                         s_text = "".join([w.word for w in current_words]).strip()
                         segments_list.append(SimpleSegment(s_start, s_end, s_text))
-                        
-                        current_words = []
-                        current_len = 0
-                    
-                    current_words.append(word)
-                    current_len += len(w_text)
-                
-                if current_words:
-                    s_start = current_words[0].start
-                    s_end = current_words[-1].end
-                    s_text = "".join([w.word for w in current_words]).strip()
-                    segments_list.append(SimpleSegment(s_start, s_end, s_text))
+                else:
+                    num_splits = (len(text) + max_chars_per_line - 1) // max_chars_per_line
+                    duration = segment.end - segment.start
+                    for s in range(num_splits):
+                        part_text = text[s*max_chars_per_line : (s+1)*max_chars_per_line]
+                        part_start = segment.start + (s / num_splits) * duration
+                        part_end = segment.start + ((s + 1) / num_splits) * duration
+                        segments_list.append(SimpleSegment(part_start, part_end, part_text))
             else:
-                # Fallback: simple linear split if word timestamps are missing for some reason
-                num_splits = (len(text) + max_chars_per_line - 1) // max_chars_per_line
-                duration = segment.end - segment.start
-                for s in range(num_splits):
-                    part_text = text[s*max_chars_per_line : (s+1)*max_chars_per_line]
-                    part_start = segment.start + (s / num_splits) * duration
-                    part_end = segment.start + ((s + 1) / num_splits) * duration
-                    segments_list.append(SimpleSegment(part_start, part_end, part_text))
-        else:
-            segments_list.append(segment)
-        
-        if i % 50 == 0:
-            print(f"Transcribed segment {i}: {segment.start:.1f}s - {segment.end:.1f}s")
+                segments_list.append(segment)
             
-    if progress_callback:
-        progress_callback(100)
+            if i % 50 == 0:
+                print(f"Transcribed segment {i}: {segment.start:.1f}s - {segment.end:.1f}s")
+                
+        if progress_callback:
+            progress_callback(100)
     
     print(f"Transcription complete. Total segments: {len(segments_list)}")
     

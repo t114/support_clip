@@ -700,7 +700,7 @@ Your JSON array (start with [):"""
         traceback.print_exc()
         return []
 
-def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float) -> dict:
+def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float, ollama_host: str = None, ollama_model: str = None) -> dict:
     """
     Evaluates the quality/interestingness of a clip using AI.
     Returns a score (1-5 stars) and reasoning.
@@ -776,8 +776,10 @@ def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float) -> 
 
 スコア（1-5）とreason（理由を日本語で）を含むJSONオブジェクト（JSONのみで応答、他のテキストは含めない）:"""
 
-        client = ollama.Client(host=OLLAMA_HOST, timeout=60.0)
-        response = client.chat(model=OLLAMA_MODEL, messages=[
+        actual_host = ollama_host if ollama_host else OLLAMA_HOST
+        actual_model = ollama_model if ollama_model else OLLAMA_MODEL
+        client = ollama.Client(host=actual_host, timeout=60.0)
+        response = client.chat(model=actual_model, messages=[
             {
                 'role': 'user',
                 'content': prompt,
