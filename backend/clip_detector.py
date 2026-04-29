@@ -377,7 +377,9 @@ def _build_comment_summary(comments: list, window_start: float, window_end: floa
 def _analyze_chunk_with_ai(segments: list, comments: list,
                             first_ts: float, last_ts: float,
                             target_boundaries: int,
-                            context: str = '') -> list:
+                            context: str = '',
+                            ollama_host: str = None,
+                            ollama_model: str = None) -> list:
     """
     1つの時間チャンクを Ollama で解析して境界リストを返す内部関数。
     """
@@ -425,7 +427,9 @@ Transcript:
 JSON array (start with [):"""
 
     try:
-        client = ollama.Client(host=OLLAMA_HOST, timeout=90.0)
+        actual_host = ollama_host if ollama_host else OLLAMA_HOST
+        actual_model = ollama_model if ollama_model else OLLAMA_MODEL
+        client = ollama.Client(host=actual_host, timeout=90.0)
 
         best_boundaries: list = []
         best_count = 0
@@ -441,7 +445,7 @@ JSON array (start with [):"""
                 sys.stderr.flush()
 
                 response = client.chat(
-                    model=OLLAMA_MODEL,
+                    model=actual_model,
                     messages=[
                         {
                             'role': 'system',
@@ -504,7 +508,9 @@ JSON array (start with [):"""
 def analyze_transcript_with_ai(segments: list, max_clips: int = 5,
                                 start_time: float = 0,
                                 comments: list = None,
-                                context: str = '') -> list:
+                                context: str = '',
+                                ollama_host: str = None,
+                                ollama_model: str = None) -> list:
     """
     Analyzes transcript segments using Ollama to identify interesting clips.
 
@@ -592,6 +598,8 @@ def analyze_transcript_with_ai(segments: list, max_clips: int = 5,
             last_ts=c_end,
             target_boundaries=boundaries_per_chunk,
             context=context,
+            ollama_host=ollama_host,
+            ollama_model=ollama_model
         )
         print(f"[AI_ANALYZE]   Got {len(raw)} raw boundaries from chunk {chunk_idx+1}")
         all_raw_boundaries.extend(raw)

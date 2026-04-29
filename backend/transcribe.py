@@ -1,4 +1,5 @@
 from faster_whisper import WhisperModel
+import os
 import requests
 import subprocess
 import sys
@@ -147,27 +148,42 @@ def detect_streamer_context(info_json_path: str | None) -> dict:
     members = _load_hololive_members()
     matched_member = None
 
+    # 1. チャンネルURLで完全一致
     for member in members:
-        # チャンネルURLで完全一致
         member_url = member.get('channel_url', '')
         if member_url and channel_url:
-            # @handle 部分で比較（大文字小文字無視）
             m_handle = member_url.rstrip('/').split('/')[-1].lower()
             c_handle = channel_url.rstrip('/').split('/')[-1].lower()
             if m_handle == c_handle:
                 matched_member = member
                 break
 
-        # チャンネル名・タイトル・概要欄でキーワード照合
-        if not matched_member:
+    # 2. チャンネル名での完全一致/キーワード一致
+    if not matched_member:
+        for member in members:
             for kw in member.get('keywords', []):
-                search_text = f'{channel_name} {video_title} {description[:500]}'
-                if kw in search_text:
+                if kw in channel_name:
                     matched_member = member
                     break
+            if matched_member:
+                break
 
-        if matched_member:
-            break
+    # 3. タイトルでのキーワード一致
+    if not matched_member:
+        for member in members:
+            for kw in member.get('keywords', []):
+                if kw in video_title:
+                    matched_member = member
+                    break
+            if matched_member:
+                break
+
+    # 4. 概要欄でのフルネーム一致（誤検出を防ぐためキーワードではなくフルネームを使用）
+    if not matched_member:
+        for member in members:
+            if member.get('name_ja') in description[:500]:
+                matched_member = member
+                break
 
     if matched_member:
         result['is_hololive']    = True
@@ -448,11 +464,22 @@ def transcribe_video(video_path: str, progress_callback=None, model_size: str = 
                 progress_callback(30)
                 
             with open(audio_path, "rb") as f:
-                response = requests.post(
-                    external_url,
-                    files={"file": (os.path.basename(audio_path), f, "audio/wav")},
-                    data={"model": "whisper-1", "response_format": "verbose_json"},
-                    timeout=600
+                # URLに応じてリクエスト形式を切り替え
+                if "/asr" in external_url:
+                    # onerahmet/openai-whisper-asr-webservice 形式
+                    response = requests.post(
+                        external_url,
+                        files={"audio_file": (os.path.basename(audio_path), f, "audio/wav")},
+                        params={"task": "transcribe", "language": "ja", "output": "json", "word_timestamps": "true"},
+                        timeout=3600
+                    )
+                else:
+                    # OpenAI互換 (fedirz/faster-whisper-server など)
+                    response = requests.post(
+                        external_url,
+                        files={"file": (os.path.basename(audio_path), f, "audio/wav")},
+                        data={"model": "whisper-1", "response_format": "verbose_json", "language": "ja"},
+                        timeout=3600
                 )
                 
                 if response.status_code != 200:
@@ -492,7 +519,7 @@ def transcribe_video(video_path: str, progress_callback=None, model_size: str = 
         model = get_model(model_size)
         
         word_ts = max_chars_per_line > 0
-        segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=word_ts)
+        segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=word_ts, language="ja")
         
         print(f"Detected language '{info.language}' with probability {info.language_probability}")
         

@@ -7,9 +7,9 @@ import { stringifyVTT } from '../utils/vtt';
 function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
     const [url, setUrl] = useState('');
     const [modelSize, setModelSize] = useState('none');
-    const [externalTranscribeUrl, setExternalTranscribeUrl] = useState('http://192.168.1.203:8000/v1/audio/transcriptions');
+    const [externalTranscribeUrl, setExternalTranscribeUrl] = useState('http://192.168.1.203:8000/asr');
     const [ollamaHost, setOllamaHost] = useState('http://192.168.1.203:11434');
-    const [ollamaModel, setOllamaModel] = useState('gemma2:9b');
+    const [ollamaModel, setOllamaModel] = useState('qwen2.5:7b');
     const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
     const [analysisMode, setAnalysisMode] = useState(false); // 360p download for analysis
     const [status, setStatus] = useState('idle'); // idle, downloading, analyzing, ready
@@ -241,8 +241,6 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
             }
 
             setClips([]);
-            setAnalysisOffset(0);
-            setHasMore(false);
 
             // Set start_time from backend (derived from URL)
             let currentStartTime = 0;
@@ -845,8 +843,6 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
 
                                                         // Reset analysis state
                                                         setClips([]);
-                                                        setAnalysisOffset(0);
-                                                        setHasMore(false);
                                                     }
                                                     if (data.srt_url) {
                                                         setSrtUrl(data.srt_url);

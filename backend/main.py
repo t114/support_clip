@@ -1221,8 +1221,8 @@ async def analyze_video(request: AnalyzeRequest):
             print(f"No comments file found for {base_name}")
 
         # ── AI解析（字幕＋コメントを統合してOllamaで解析）──────────────────
-        from clip_detector import analyze_transcript_with_ai
-        from transcribe import detect_streamer_context
+        from .clip_detector import analyze_transcript_with_ai
+        from .transcribe import detect_streamer_context
 
         # 配信者コンテキスト取得（info.json と hololive_members.json を照合）
         info_json_path_for_ctx = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
@@ -1241,6 +1241,8 @@ async def analyze_video(request: AnalyzeRequest):
                 start_time=request.start_time,
                 comments=comments,
                 context=context_sentence,
+                ollama_host=request.ollama_host,
+                ollama_model=request.ollama_model
             )
             # AI解析クリップにもコメントカウントを付加
             if comments and ai_clips:
