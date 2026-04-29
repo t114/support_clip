@@ -11,3 +11,4 @@ watchfiles
 selenium
 webdriver-manager
 obs-websocket-py
+audio-separator[cpu]
