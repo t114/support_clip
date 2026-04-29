@@ -335,370 +335,340 @@ def detect_boundaries_hybrid(video_path: str, segments: list, max_clips: int = 5
 
     return clips
 
-def analyze_transcript_with_ai(segments: list, max_clips: int = 5, start_time: float = 0) -> list:
+def _build_comment_summary(comments: list, window_start: float, window_end: float,
+                           bucket_sec: float = 30.0) -> str:
     """
-    Analyzes transcript segments using Ollama to identify interesting clips.
-    
-    Args:
-        segments: 文字起こしセグメント
-        max_clips: 最大クリップ数
-        start_time: 解析開始時刻（秒）
+    指定時間帯のコメントを bucket_sec 秒単位でまとめ、
+    AIプロンプトに挿入できる文字列を生成する。
+
+    返す形式:
+        [120s] (12 comments) w www すごい！ 草草草 やばすぎ ...
+        [150s] (5 comments) かわいい ...
     """
+    if not comments:
+        return ""
 
-    # start_time以降のセグメントのみをフィルタリング
-    if start_time > 0:
-        filtered_segments = [
-            seg for seg in segments
-            if (seg.start if hasattr(seg, 'start') else seg['start']) >= start_time
-        ]
-        
-        if not filtered_segments:
-            print(f"Warning: No segments found after start_time={start_time}s")
-            return []
-        
-        segments = filtered_segments
-        print(f"Filtered to {len(segments)} segments after start_time={start_time}s")
+    # 対象時間帯でフィルタ
+    filtered = [c for c in comments
+                if window_start <= c.get('timestamp', -1) < window_end]
+    if not filtered:
+        return ""
 
-    # If transcript chunk is still too long, sample segments to stay within context limits
-    # Ollama llama3.2 has a 4096 token context limit
-    MAX_SEGMENTS = 200  # Match CHUNK_SIZE to preserve full context for longer clips
+    # バケット単位で集計
+    import math
+    buckets: dict[int, list[str]] = {}
+    for c in filtered:
+        ts = c.get('timestamp', 0)
+        bucket = int(ts // bucket_sec) * int(bucket_sec)
+        buckets.setdefault(bucket, []).append(c.get('text', '').strip())
 
-    if len(segments) > MAX_SEGMENTS:
-        # Sample segments evenly BASED ON TIME, not just index
-        # This ensures we get segments from beginning, middle, and end
-        first_time = segments[0].start if hasattr(segments[0], 'start') else segments[0]['start']
-        last_time = segments[-1].end if hasattr(segments[-1], 'end') else segments[-1]['end']
-        time_range = last_time - first_time
+    lines = []
+    for bucket_ts in sorted(buckets.keys()):
+        texts = buckets[bucket_ts]
+        # 先頭 8 コメントだけ表示（長くなりすぎ防止）
+        preview = ' / '.join(texts[:8])
+        if len(texts) > 8:
+            preview += f' ... (+{len(texts)-8})'
+        lines.append(f"[{bucket_ts}s] ({len(texts)} comments) {preview}")
 
-        sampled_segments = []
-        for i in range(MAX_SEGMENTS):
-            # Calculate target time for this sample
-            target_time = first_time + (time_range * i / MAX_SEGMENTS)
+    return '\n'.join(lines)
 
-            # Find segment closest to target time
-            closest_seg = min(segments, key=lambda s: abs(
-                (s.start if hasattr(s, 'start') else s['start']) - target_time
-            ))
 
-            # Avoid duplicates
-            if not sampled_segments or closest_seg != sampled_segments[-1]:
-                sampled_segments.append(closest_seg)
-
-        print(f"Chunk too long ({len(segments)} segments). Time-based sampling: {len(sampled_segments)} segments from {first_time:.1f}s to {last_time:.1f}s")
-    else:
-        sampled_segments = segments
-        print(f"Processing {len(segments)} segments")
-
-    # Prepare transcript text for the LLM
+def _analyze_chunk_with_ai(segments: list, comments: list,
+                            first_ts: float, last_ts: float,
+                            target_boundaries: int,
+                            context: str = '') -> list:
+    """
+    1つの時間チャンクを Ollama で解析して境界リストを返す内部関数。
+    """
+    # ── 字幕テキスト組み立て ────────────────────────────────────────────────
     transcript_text = ""
-    first_timestamp = None
-    last_timestamp = None
+    for seg in segments:
+        start = seg.get('start') if isinstance(seg, dict) else seg.start
+        end   = seg.get('end')   if isinstance(seg, dict) else seg.end
+        text  = seg.get('text')  if isinstance(seg, dict) else seg.text
+        transcript_text += f"[{start:.1f}-{end:.1f}] {text}\n"
 
-    for seg in sampled_segments:
-        # seg is expected to be a dict or object with start, end, text
-        # faster-whisper segments are objects
-        start = seg.start if hasattr(seg, 'start') else seg['start']
-        end = seg.end if hasattr(seg, 'end') else seg['end']
-        text = seg.text if hasattr(seg, 'text') else seg['text']
+    # ── コメントサマリー組み立て ─────────────────────────────────────────────
+    comment_section = ""
+    if comments:
+        summary = _build_comment_summary(comments, first_ts, last_ts, bucket_sec=30.0)
+        if summary:
+            comment_section = f"\n\nLive chat comments (30-second buckets):\n{summary}\n"
 
-        if first_timestamp is None:
-            first_timestamp = start
-        last_timestamp = end
+    has_comments = bool(comment_section)
+    context_line = f"\nContext: {context}" if context else ""
 
-        transcript_text += f"[{start:.2f}-{end:.2f}] {text}\n"
+    prompt = f"""You are a JSON generator that finds interesting clip boundaries in a Japanese livestream.
+{context_line}
 
-    # Calculate video duration from transcript
-    video_duration = last_timestamp if last_timestamp else 0
+Video range: {first_ts:.1f}s - {last_ts:.1f}s
+Find EXACTLY {target_boundaries} timestamps where exciting/interesting moments occur.
+{"Use BOTH the transcript AND the live chat comments to identify high-energy moments (many comments, laughter 'w'/'草', excitement, reactions)." if has_comments else "Use the transcript to identify topic shifts and interesting moments."}
 
-    # Calculate target number of boundaries (話の区切り)
-    # Aim for 6-10 boundaries to create meaningful clips
-    target_boundaries = max(6, min(10, max_clips * 2))
-
-    prompt = f"""You are a JSON generator. Find {target_boundaries} topic boundaries where conversations shift or new topics begin.
-
-Video: {first_timestamp:.1f}s - {last_timestamp:.1f}s (spread boundaries evenly)
-
-REQUIRED OUTPUT - Start your response with [ :
+REQUIRED OUTPUT format (JSON array only, start with [):
 [
-  {{"timestamp": 50, "description": "topic 1"}},
-  {{"timestamp": 150, "description": "topic 2"}},
-  {{"timestamp": 300, "description": "topic 3"}},
-  {{"timestamp": 500, "description": "topic 4"}},
-  {{"timestamp": 700, "description": "topic 5"}},
-  {{"timestamp": 850, "description": "topic 6"}}
+  {{"timestamp": 50, "description": "moment description"}},
+  {{"timestamp": 150, "description": "moment description"}}
 ]
 
 RULES:
-1. MUST be a JSON array starting with [ and ending with ]
-2. MUST contain EXACTLY {target_boundaries} objects
-3. NEVER return a single object like {{"timestamp":...}}
-4. Each object format: {{"timestamp": number, "description": "text"}}
-5. Timestamps MUST spread from {first_timestamp:.1f} to {last_timestamp:.1f}
+1. Return ONLY a JSON array starting with [ and ending with ]
+2. Include EXACTLY {target_boundaries} objects
+3. Timestamps MUST be between {first_ts:.1f} and {last_ts:.1f}
+4. Spread timestamps across the full range
+5. Prefer timestamps where comments are densest / transcript shows excitement{comment_section}
 
 Transcript:
 {transcript_text}
 
-Your JSON array (start with [):"""
+JSON array (start with [):"""
 
     try:
-        # Try multiple times with different temperatures to get best result
-        max_retries = 3
-        best_boundaries = []
+        client = ollama.Client(host=OLLAMA_HOST, timeout=90.0)
+
+        best_boundaries: list = []
         best_count = 0
 
-        for attempt in range(max_retries):
+        for attempt in range(3):
+            temp = 0.1 if attempt == 0 else (0.3 if attempt == 1 else 0.5)
             try:
-                # Use different temperatures for diversity
-                temp = 0.1 if attempt == 0 else (0.3 if attempt == 1 else 0.5)
-
-                sys.stderr.write(f"[CLIP_DETECTOR] Sending prompt to Ollama (model: {OLLAMA_MODEL}, attempt {attempt + 1}/{max_retries}, temp={temp})...\n")
-                sys.stderr.write(f"[CLIP_DETECTOR] Transcript length: {len(transcript_text)} chars, {len(sampled_segments)} segments\n")
+                sys.stderr.write(
+                    f"[CLIP_DETECTOR] Chunk {first_ts:.0f}-{last_ts:.0f}s, "
+                    f"attempt {attempt+1}/3, temp={temp}, "
+                    f"comments={'yes' if has_comments else 'no'}\n"
+                )
                 sys.stderr.flush()
 
-                client = ollama.Client(host=OLLAMA_HOST, timeout=60.0)
                 response = client.chat(
                     model=OLLAMA_MODEL,
                     messages=[
                         {
                             'role': 'system',
-                            'content': 'You are a strict JSON array generator. Your response MUST start with [ and end with ]. NEVER return a single object {}. NEVER return anything except a JSON array. No explanations, no text, ONLY the array.'
+                            'content': (
+                                'You are a strict JSON array generator. '
+                                'Your response MUST start with [ and end with ]. '
+                                'NEVER return anything except a JSON array.'
+                            )
                         },
-                        {
-                            'role': 'user',
-                            'content': prompt,
-                        }
+                        {'role': 'user', 'content': prompt},
                     ],
-                    format='json',  # Force JSON output
-                    options={
-                        'temperature': temp,
-                        'num_predict': 1000,  # Allow enough tokens for array
-                    }
+                    format='json',
+                    options={'temperature': temp, 'num_predict': 1500},
                 )
 
-                sys.stderr.write(f"[CLIP_DETECTOR] Got response from Ollama (attempt {attempt + 1})\n")
                 content = response['message']['content']
-                sys.stderr.write(f"[CLIP_DETECTOR] Response content length: {len(content)} chars\n")
-                sys.stderr.flush()
+                parsed = json.loads(content.strip())
 
-                # Try to parse JSON for this attempt
-                try:
-                    # With format='json', content should be valid JSON directly
-                    parsed = json.loads(content.strip())
-                    boundaries = []
-
-                    # If it's a dict, try to extract the array from common keys
-                    if isinstance(parsed, dict):
-                        # Try common keys that might contain the boundaries array
-                        for key in ['boundaries', 'clips', 'segments', 'data', 'results', 'bounds', 'border', 'topics']:
-                            if key in parsed and isinstance(parsed[key], list):
-                                boundaries = parsed[key]
-                                sys.stderr.write(f"[CLIP_DETECTOR] Found array in key '{key}' with {len(boundaries)} items\n")
-                                sys.stderr.flush()
-                                break
-                        else:
-                            # Check if it's a single boundary object
-                            if ('timestamp' in parsed and not isinstance(parsed.get('timestamp'), list)) or 'start' in parsed:
-                                boundaries = [parsed]
-                                sys.stderr.write(f"[CLIP_DETECTOR] Single object, wrapping in array\n")
-                                sys.stderr.flush()
-                    elif isinstance(parsed, list):
-                        boundaries = parsed
-                        sys.stderr.write(f"[CLIP_DETECTOR] Got JSON array with {len(boundaries)} boundaries\n")
-                        sys.stderr.flush()
-
-                    # Update best_boundaries if this attempt is better
-                    if len(boundaries) > best_count:
-                        best_count = len(boundaries)
-                        best_boundaries = boundaries
-                        sys.stderr.write(f"[CLIP_DETECTOR] New best: {best_count} boundaries\n")
-                        sys.stderr.flush()
-
-                        # If we got enough boundaries, we can stop early
-                        if best_count >= target_boundaries:
-                            sys.stderr.write(f"[CLIP_DETECTOR] Got target {target_boundaries} boundaries, stopping early\n")
-                            sys.stderr.flush()
+                boundaries: list = []
+                if isinstance(parsed, list):
+                    boundaries = parsed
+                elif isinstance(parsed, dict):
+                    for key in ('boundaries', 'clips', 'segments', 'data',
+                                'results', 'topics', 'moments'):
+                        if key in parsed and isinstance(parsed[key], list):
+                            boundaries = parsed[key]
                             break
+                    else:
+                        if 'timestamp' in parsed:
+                            boundaries = [parsed]
 
-                except (json.JSONDecodeError, ValueError) as e:
-                    # Fallback: try to extract JSON array
-                    sys.stderr.write(f"[CLIP_DETECTOR] Parse failed for attempt {attempt + 1}: {e}\n")
-                    import re
-                    json_match = re.search(r'\[.*\]', content, re.DOTALL)
-                    if json_match:
-                        try:
-                            boundaries = json.loads(json_match.group(0).strip())
-                            if len(boundaries) > best_count:
-                                best_count = len(boundaries)
-                                best_boundaries = boundaries
-                                sys.stderr.write(f"[CLIP_DETECTOR] Fallback success, new best: {best_count}\n")
-                                sys.stderr.flush()
-                        except:
-                            pass
-                    sys.stderr.flush()
+                if len(boundaries) > best_count:
+                    best_count = len(boundaries)
+                    best_boundaries = boundaries
+                    if best_count >= target_boundaries:
+                        break
 
+            except json.JSONDecodeError:
+                import re as _re
+                m = _re.search(r'\[.*\]', content, _re.DOTALL)
+                if m:
+                    try:
+                        boundaries = json.loads(m.group(0))
+                        if len(boundaries) > best_count:
+                            best_count = len(boundaries)
+                            best_boundaries = boundaries
+                    except Exception:
+                        pass
             except Exception as e:
-                sys.stderr.write(f"[CLIP_DETECTOR] Attempt {attempt + 1} failed: {e}\n")
-                sys.stderr.flush()
-                continue
-
-        # Use the best boundaries found across all attempts
-        boundaries = best_boundaries
-        print(f"AI identified {len(boundaries)} topic boundaries (best of {max_retries} attempts)")
-
-        # Normalize boundaries to have 'timestamp' and 'description' fields
-        normalized_boundaries = []
-        for b in boundaries:
-            # Extract timestamp from various possible formats
-            timestamp = None
-            description = ""
-
-            if isinstance(b, dict):
-                # Try different timestamp field names
-                if 'timestamp' in b and not isinstance(b['timestamp'], list):
-                    timestamp = b['timestamp']
-                elif 'start' in b:
-                    timestamp = b['start']
-                elif 'start_time' in b:
-                    timestamp = b['start_time']
-                elif 'time' in b:
-                    timestamp = b['time']
-
-                # Try different description field names
-                if 'description' in b:
-                    description = b['description']
-                elif 'topic' in b:
-                    description = b['topic']
-                elif 'title' in b:
-                    description = b['title']
-
-            # Only add if we have a valid timestamp
-            if timestamp is not None:
-                normalized_boundaries.append({
-                    'timestamp': float(timestamp),
-                    'description': str(description) if description else "トピック境界"
-                })
-            else:
-                sys.stderr.write(f"[CLIP_DETECTOR] Skipping boundary with no valid timestamp: {b}\n")
+                sys.stderr.write(f"[CLIP_DETECTOR] Attempt {attempt+1} error: {e}\n")
                 sys.stderr.flush()
 
-        boundaries = normalized_boundaries
-        print(f"Normalized to {len(boundaries)} valid boundaries")
+        return best_boundaries
 
-        # Need at least 2 boundaries to create clips
-        if len(boundaries) < 2:
-            sys.stderr.write(f"[CLIP_DETECTOR] WARNING: Only {len(boundaries)} boundaries found, need at least 2. Adding fallback boundaries.\n")
-            sys.stderr.flush()
-
-            # Add boundaries at regular intervals
-            num_needed = max(target_boundaries, 6) - len(boundaries)
-            for i in range(num_needed):
-                fallback_time = first_timestamp + (last_timestamp - first_timestamp) * (i + 1) / (num_needed + 1)
-                boundaries.append({
-                    'timestamp': fallback_time,
-                    'description': f"区間 {i+1}"
-                })
-            print(f"Added {num_needed} fallback boundaries, total now: {len(boundaries)}")
-
-        # Sort boundaries by timestamp
-        boundaries = sorted(boundaries, key=lambda x: x.get('timestamp', 0))
-
-        # Validate that boundaries are distributed across the video
-        if len(boundaries) > 0:
-            boundary_times = [b.get('timestamp', 0) for b in boundaries]
-            min_boundary = min(boundary_times)
-            max_boundary = max(boundary_times)
-            time_span = max_boundary - min_boundary
-            total_span = last_timestamp - first_timestamp
-
-            print(f"Boundary distribution: {min_boundary:.1f}s to {max_boundary:.1f}s (span: {time_span:.1f}s / {total_span:.1f}s = {time_span/total_span*100:.1f}%)")
-
-            # Divide video into thirds for distribution check
-            third = total_span / 3
-            range1_end = first_timestamp + third
-            range2_end = first_timestamp + (2 * third)
-
-            # Count boundaries in each third
-            range1_count = sum(1 for t in boundary_times if first_timestamp <= t < range1_end)
-            range2_count = sum(1 for t in boundary_times if range1_end <= t < range2_end)
-            range3_count = sum(1 for t in boundary_times if range2_end <= t <= last_timestamp)
-
-            print(f"Distribution by range: Range1={range1_count}, Range2={range2_count}, Range3={range3_count}")
-
-            # Warn if boundaries are too clustered
-            if time_span < total_span * 0.3:
-                print(f"WARNING: Boundaries are clustered in only {time_span/total_span*100:.1f}% of the video time range!")
-            if range1_count > len(boundaries) * 0.7:
-                print(f"WARNING: {range1_count}/{len(boundaries)} boundaries are in the first third of the video!")
-            if range3_count == 0 and total_span > 300:
-                print(f"WARNING: No boundaries detected in the last third of the video!")
-
-        # Create clips from boundaries (区切りと区切りの間をクリップにする)
-        clips = []
-        for i in range(len(boundaries) - 1):
-            start = boundaries[i]['timestamp']
-            end = boundaries[i + 1]['timestamp']
-            duration = end - start
-
-            # 最大時間を超える場合は制限
-            if duration > MAX_CLIP_DURATION:
-                end = start + MAX_CLIP_DURATION
-                duration = MAX_CLIP_DURATION
-
-            clip = {
-                'start': start,
-                'end': end,
-                'title': boundaries[i + 1].get('description', 'トピック'),
-                'duration': duration
-            }
-            clips.append(clip)
-            print(f"Initial clip {i+1}: {start:.1f}-{end:.1f} ({duration:.1f}s) - {clip['title']}")
-
-        # 10秒未満のクリップを隣接するクリップと結合
-        merged_clips = []
-        i = 0
-        while i < len(clips):
-            current_clip = clips[i].copy()
-
-            # 10秒未満の場合、次のクリップと結合
-            while current_clip['duration'] < MIN_CLIP_DURATION and i + 1 < len(clips):
-                next_clip = clips[i + 1]
-                current_clip['end'] = next_clip['end']
-                current_clip['duration'] = current_clip['end'] - current_clip['start']
-
-                # タイトルを結合
-                if current_clip['title'] != next_clip['title']:
-                    current_clip['title'] = f"{current_clip['title']} → {next_clip['title']}"
-
-                i += 1
-                print(f"Merged with next clip: now {current_clip['start']:.1f}-{current_clip['end']:.1f} ({current_clip['duration']:.1f}s)")
-
-            # 最大時間を超える場合は制限
-            if current_clip['duration'] > MAX_CLIP_DURATION:
-                current_clip['end'] = current_clip['start'] + MAX_CLIP_DURATION
-                current_clip['duration'] = MAX_CLIP_DURATION
-                print(f"Limited to MAX_CLIP_DURATION: {current_clip['start']:.1f}-{current_clip['end']:.1f} ({current_clip['duration']:.1f}s)")
-
-            # 10秒以上のクリップのみ追加
-            if current_clip['duration'] >= MIN_CLIP_DURATION:
-                merged_clips.append({
-                    'start': current_clip['start'],
-                    'end': current_clip['end'],
-                    'title': current_clip['title'],
-                    'reason': f"{current_clip['duration']:.1f}秒のクリップ"
-                })
-                print(f"Added clip: {current_clip['start']:.1f}-{current_clip['end']:.1f} ({current_clip['duration']:.1f}s)")
-            else:
-                print(f"Skipped short clip: {current_clip['start']:.1f}-{current_clip['end']:.1f} ({current_clip['duration']:.1f}s)")
-
-            i += 1
-
-        print(f"Generated {len(merged_clips)} clips from {len(boundaries)} boundaries")
-        return merged_clips
     except Exception as e:
-        print(f"Error analyzing transcript with AI: {e}")
-        import traceback
-        traceback.print_exc()
+        sys.stderr.write(f"[CLIP_DETECTOR] _analyze_chunk_with_ai error: {e}\n")
+        sys.stderr.flush()
         return []
+
+def analyze_transcript_with_ai(segments: list, max_clips: int = 5,
+                                start_time: float = 0,
+                                comments: list = None,
+                                context: str = '') -> list:
+    """
+    Analyzes transcript segments using Ollama to identify interesting clips.
+
+    Args:
+        segments: 文字起こしセグメント
+        max_clips: 最大クリップ数
+        start_time: 解析開始時刻（秒）
+        comments: ライブチャットコメントのリスト（各要素は {'timestamp': float, 'text': str}）
+        context: 配信者・コンテンツ情報の前提文（プロンプトに挿入される）
+    """
+
+    CHUNK_MINUTES = 60          # 1チャンクあたりの時間（分）※スペックアップにより拡大
+    MAX_SEGS_PER_CHUNK = 500    # 1チャンクに含める最大セグメント数（スペックアップにより拡大）
+    comments = comments or []
+
+    # start_time以降のセグメントのみをフィルタリング
+    if start_time > 0:
+        segments = [
+            seg for seg in segments
+            if (seg.get('start') if isinstance(seg, dict) else seg.start) >= start_time
+        ]
+        if not segments:
+            print(f"Warning: No segments found after start_time={start_time}s")
+            return []
+        print(f"Filtered to {len(segments)} segments after start_time={start_time}s")
+
+    if not segments:
+        return []
+
+    def _get(seg, key):
+        return seg.get(key) if isinstance(seg, dict) else getattr(seg, key)
+
+    first_time_all = _get(segments[0], 'start')
+    last_time_all  = _get(segments[-1], 'end')
+    total_duration = last_time_all - first_time_all
+
+    # ── チャンク分割 ────────────────────────────────────────────────────────
+    chunk_sec = CHUNK_MINUTES * 60
+    if total_duration <= chunk_sec:
+        # 短い場合は分割なし
+        chunks = [(segments, first_time_all, last_time_all)]
+        print(f"[AI_ANALYZE] Single chunk: {first_time_all:.0f}s-{last_time_all:.0f}s "
+              f"({total_duration/60:.1f}min, comments={len(comments)})")
+    else:
+        chunks = []
+        chunk_start = first_time_all
+        while chunk_start < last_time_all:
+            chunk_end = min(chunk_start + chunk_sec, last_time_all)
+            chunk_segs = [s for s in segments
+                          if _get(s, 'start') >= chunk_start and _get(s, 'end') <= chunk_end + 10]
+            if chunk_segs:
+                chunks.append((chunk_segs, chunk_start, chunk_end))
+            chunk_start = chunk_end
+        print(f"[AI_ANALYZE] Split into {len(chunks)} chunks "
+              f"({CHUNK_MINUTES}min each, total {total_duration/60:.1f}min, comments={len(comments)})")
+
+    # ── 各チャンクの境界数を配分 ─────────────────────────────────────────────
+    # 合計でおよそ max_clips*2 個の境界を得る（最小6、最大10/chunk）
+    target_total_boundaries = max(6, min(len(chunks) * 10, max_clips * 2 + 2))
+    boundaries_per_chunk = max(4, target_total_boundaries // len(chunks))
+
+    # ── チャンクごとにAI解析 ─────────────────────────────────────────────────
+    all_raw_boundaries: list = []
+
+    for chunk_idx, (chunk_segs, c_start, c_end) in enumerate(chunks):
+        print(f"[AI_ANALYZE] Chunk {chunk_idx+1}/{len(chunks)}: "
+              f"{c_start:.0f}s-{c_end:.0f}s ({len(chunk_segs)} segs)")
+
+        # セグメント数が多すぎる場合は時間ベースでサンプリング
+        if len(chunk_segs) > MAX_SEGS_PER_CHUNK:
+            time_range = c_end - c_start
+            sampled: list = []
+            for i in range(MAX_SEGS_PER_CHUNK):
+                target_t = c_start + (time_range * i / MAX_SEGS_PER_CHUNK)
+                closest = min(chunk_segs, key=lambda s: abs(_get(s, 'start') - target_t))
+                if not sampled or closest is not sampled[-1]:
+                    sampled.append(closest)
+            chunk_segs = sampled
+            print(f"[AI_ANALYZE]   Sampled to {len(chunk_segs)} segments")
+
+        raw = _analyze_chunk_with_ai(
+            segments=chunk_segs,
+            comments=comments,
+            first_ts=c_start,
+            last_ts=c_end,
+            target_boundaries=boundaries_per_chunk,
+            context=context,
+        )
+        print(f"[AI_ANALYZE]   Got {len(raw)} raw boundaries from chunk {chunk_idx+1}")
+        all_raw_boundaries.extend(raw)
+
+    # ── 全チャンクの境界を正規化 ─────────────────────────────────────────────
+    def _normalize_boundary(b) -> dict | None:
+        if not isinstance(b, dict):
+            return None
+        ts = (b.get('timestamp') or b.get('start') or
+              b.get('start_time') or b.get('time'))
+        if ts is None:
+            return None
+        desc = (b.get('description') or b.get('topic') or
+                b.get('title') or 'トピック境界')
+        return {'timestamp': float(ts), 'description': str(desc)}
+
+    boundaries = []
+    for b in all_raw_boundaries:
+        norm = _normalize_boundary(b)
+        if norm and first_time_all <= norm['timestamp'] <= last_time_all:
+            boundaries.append(norm)
+
+    boundaries = sorted(boundaries, key=lambda x: x['timestamp'])
+    print(f"[AI_ANALYZE] Normalized to {len(boundaries)} valid boundaries "
+          f"({first_time_all:.0f}s-{last_time_all:.0f}s)")
+
+    # ── 境界が少ない場合はフォールバック ─────────────────────────────────────
+    if len(boundaries) < 2:
+        sys.stderr.write(f"[CLIP_DETECTOR] WARNING: Only {len(boundaries)} boundaries, adding fallback.\n")
+        needed = max(6, target_total_boundaries) - len(boundaries)
+        for i in range(needed):
+            t = first_time_all + (last_time_all - first_time_all) * (i + 1) / (needed + 1)
+            boundaries.append({'timestamp': t, 'description': f'区間{i+1}'})
+        boundaries = sorted(boundaries, key=lambda x: x['timestamp'])
+        print(f"[AI_ANALYZE] Added fallback boundaries, total={len(boundaries)}")
+
+    # ── 境界 → クリップ変換 ───────────────────────────────────────────────
+    raw_clips = []
+    for i in range(len(boundaries) - 1):
+        s = boundaries[i]['timestamp']
+        e = boundaries[i + 1]['timestamp']
+        dur = e - s
+        if dur > MAX_CLIP_DURATION:
+            e = s + MAX_CLIP_DURATION
+            dur = MAX_CLIP_DURATION
+        raw_clips.append({
+            'start': s, 'end': e,
+            'title': boundaries[i + 1].get('description', 'トピック'),
+            'duration': dur,
+        })
+
+    # ── MIN_CLIP_DURATION 未満は隣と結合 ─────────────────────────────────
+    merged_clips = []
+    i = 0
+    while i < len(raw_clips):
+        cur = raw_clips[i].copy()
+        while cur['duration'] < MIN_CLIP_DURATION and i + 1 < len(raw_clips):
+            nxt = raw_clips[i + 1]
+            cur['end'] = nxt['end']
+            cur['duration'] = cur['end'] - cur['start']
+            if cur['title'] != nxt['title']:
+                cur['title'] = f"{cur['title']} → {nxt['title']}"
+            i += 1
+        if cur['duration'] > MAX_CLIP_DURATION:
+            cur['end'] = cur['start'] + MAX_CLIP_DURATION
+            cur['duration'] = MAX_CLIP_DURATION
+        if cur['duration'] >= MIN_CLIP_DURATION:
+            merged_clips.append({
+                'start': cur['start'],
+                'end': cur['end'],
+                'title': cur['title'],
+                'reason': f"{cur['duration']:.1f}秒のクリップ",
+            })
+        i += 1
+
+    print(f"[AI_ANALYZE] Generated {len(merged_clips)} clips from {len(boundaries)} boundaries")
+    return merged_clips
 
 def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float, ollama_host: str = None, ollama_model: str = None) -> dict:
     """

@@ -21,10 +21,6 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
     const [srtUrl, setSrtUrl] = useState('');
     const [fcpxmlUrl, setFcpxmlUrl] = useState('');
     const [vttFilename, setVttFilename] = useState('');
-    const [analysisOffset, setAnalysisOffset] = useState(0);
-    const [hasMore, setHasMore] = useState(false);
-    const [totalSegments, setTotalSegments] = useState(0);
-    const [analyzedSegments, setAnalyzedSegments] = useState(0);
     const [creatingClipId, setCreatingClipId] = useState(null);
     const [startTime, setStartTime] = useState(0);
     const [withComments, setWithComments] = useState(false);
@@ -299,10 +295,10 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
         }
     };
 
-    const analyzeVideo = async (vttFile, offset = 0) => {
+    const analyzeVideo = async (vttFile) => {
         try {
             setStatus('analyzing');
-            setMessage(`AIが動画を分析中... (${offset}セグメント目から)`);
+            setMessage('AIが動画を全セグメント分析中...');
 
             const response = await fetch('/youtube/analyze', {
                 method: 'POST',
@@ -310,7 +306,7 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                 body: JSON.stringify({
                     vtt_filename: vttFile,
                     max_clips: 5,
-                    offset: offset,
+                    offset: 0,
                     start_time: startTime,
                     ollama_host: ollamaHost,
                     ollama_model: ollamaModel
@@ -321,36 +317,19 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
 
             const data = await response.json();
 
-            // Add IDs to clips
-            const clipsWithIds = data.clips.map((c, i) => ({ ...c, id: Date.now() + i }));
+            // ハイブリッド検出クリップにIDを付与
+            const clipsWithIds = (data.clips || []).map((c, i) => ({ ...c, id: Date.now() + i }));
+            // AI解析クリップにIDを付与
+            const aiClipsWithIds = (data.ai_clips || []).map((c, i) => ({ ...c, id: Date.now() + 10000 + i, source: 'ai' }));
 
-            // Append new clips to existing ones
-            setClips(prevClips => [...prevClips, ...clipsWithIds]);
-
-            // Update analysis metadata
-            setTotalSegments(data.total_segments);
-            setAnalyzedSegments(data.analyzed_segments);
-            setHasMore(data.has_more);
-            setAnalysisOffset(data.next_offset || 0);
-
+            setClips([...clipsWithIds, ...aiClipsWithIds]);
             setStatus('ready');
-
-            if (data.has_more) {
-                setMessage(`切り抜き候補が見つかりました (${data.analyzed_segments}/${data.total_segments}セグメント分析済み)`);
-            } else {
-                setMessage(`全ての切り抜き候補が見つかりました (${data.total_segments}セグメント完了)`);
-            }
+            setMessage(`✓ 解析完了 — ハイブリッド${clipsWithIds.length}件 + AI${aiClipsWithIds.length}件 (合計${data.total_segments}セグメント)`);
 
         } catch (e) {
             console.error(e);
-            setStatus('ready'); // Allow manual creation even if AI fails
+            setStatus('ready');
             setMessage('AI分析に失敗しましたが、手動で作成できます: ' + e.message);
-        }
-    };
-
-    const handleAnalyzeMore = () => {
-        if (vttFilename && hasMore) {
-            analyzeVideo(vttFilename, analysisOffset);
         }
     };
 
@@ -824,21 +803,6 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                                 </div>
                             )}
                         </div>
-                        {totalSegments > 0 && (
-                            <div className="mt-2">
-                                <div className="flex items-center gap-2">
-                                    <div className="flex-1 bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="bg-blue-600 h-2 rounded-full transition-all"
-                                            style={{ width: `${(analyzedSegments / totalSegments) * 100}%` }}
-                                        ></div>
-                                    </div>
-                                    <span className="text-xs text-gray-600">
-                                        {analyzedSegments}/{totalSegments}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
                         <div className="mt-4 flex gap-2 flex-wrap">
                             {!vttUrl && videoInfo && (
                                 <div className="w-full mb-2">
@@ -1062,14 +1026,6 @@ function YouTubeClipCreator({ subtitles, styles, savedStyles, styleMap }) {
                         <div className="flex justify-between items-center">
                             <h3 className="text-xl font-bold">切り抜き候補 ({clips.length}件)</h3>
                             <div className="flex gap-2 flex-wrap">
-                                {hasMore && (
-                                    <button
-                                        onClick={handleAnalyzeMore}
-                                        className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-                                    >
-                                        さらに解析
-                                    </button>
-                                )}
                                 {videoInfo?.has_comments && vttFilename && (
                                     <>
                                         <button

@@ -1097,7 +1097,6 @@ class AnalyzeRequest(BaseModel):
 @app.post("/youtube/analyze")
 async def analyze_video(request: AnalyzeRequest):
     try:
-        CHUNK_SIZE = 200  # Process 200 segments at a time
 
         vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
         if not os.path.exists(vtt_path):
@@ -1169,27 +1168,22 @@ async def analyze_video(request: AnalyzeRequest):
             })
 
         total_segments = len(segments)
-        offset = request.offset
 
         # Calculate video duration from segments
         video_duration = max([seg['end'] for seg in segments]) if segments else 0
-        print(f"Video duration: {video_duration:.1f}s")
+        print(f"Video duration: {video_duration:.1f}s, Total segments: {total_segments}")
 
-        # Find the correct starting offset if start_time is provided and we are at offset 0
-        if request.start_time > 0 and offset == 0:
-            for idx, seg in enumerate(segments):
-                if seg['start'] >= request.start_time:
-                    offset = idx
-                    print(f"Jumping to segment offset {offset} due to start_time {request.start_time}s")
-                    break
-            else:
+        # start_time フィルタ（指定されている場合のみ）
+        if request.start_time > 0:
+            segments = [s for s in segments if s['start'] >= request.start_time]
+            if not segments:
                 raise HTTPException(status_code=400, detail=f"No segments found after start_time={request.start_time}s")
+            print(f"Filtered to {len(segments)} segments from start_time={request.start_time}s")
 
-        # Get the chunk to analyze
-        end_index = min(offset + CHUNK_SIZE, total_segments)
-        segments_chunk = segments[offset:end_index]
+        # 全セグメントをそのまま使用（スペックアップに伴い制限撤廃）
+        segments_chunk = segments
+        print(f"Analyzing all {len(segments_chunk)} segments")
 
-        print(f"Analyzing segments {offset}-{end_index} of {total_segments}")
         
         # Find the video file from VTT filename
         # VTT files are named the same as video files (e.g., video.mp4 -> video.vtt)
@@ -1206,32 +1200,66 @@ async def analyze_video(request: AnalyzeRequest):
         if not video_path:
             raise HTTPException(status_code=404, detail="Video file not found")
 
-        # Analyze with hybrid detection (silence + sentence boundaries)
+        # ── コメント読み込み（AI解析とカウント共用） ──────────────────────────
+        base_name = os.path.splitext(request.vtt_filename)[0]
+        comments = extract_comments(base_name)
+        print(f"Loaded {len(comments)} comments for analysis")
+
+        # ── ハイブリッド検出（無音＋文章区切り）─────────────────────────────
         clips = detect_boundaries_hybrid(video_path, segments_chunk, request.max_clips, request.start_time)
 
-        # Count comments if available
-        # VTT filename is usually [video_id].vtt
-        # Comments file is [video_id].live_chat.json or [video_id].info.json
-        base_name = os.path.splitext(request.vtt_filename)[0]
-        
-        live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
-        info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
-        
-        comments_path = None
-        if os.path.exists(live_chat_path):
-            comments_path = live_chat_path
-        elif os.path.exists(info_json_path):
-            comments_path = info_json_path
-        
-        if comments_path:
-            print(f"Found comments file: {comments_path}")
-            clips = count_comments_in_clips(clips, comments_path)
+        # コメントカウントをクリップに付加
+        if comments:
+            live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
+            info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+            comments_path = live_chat_path if os.path.exists(live_chat_path) else (
+                info_json_path if os.path.exists(info_json_path) else None
+            )
+            if comments_path:
+                clips = count_comments_in_clips(clips, comments_path)
         else:
             print(f"No comments file found for {base_name}")
 
-        # Automatically evaluate each clip
-        print(f"Evaluating {len(clips)} clips...")
-        for clip in clips:
+        # ── AI解析（字幕＋コメントを統合してOllamaで解析）──────────────────
+        from clip_detector import analyze_transcript_with_ai
+        from transcribe import detect_streamer_context
+
+        # 配信者コンテキスト取得（info.json と hololive_members.json を照合）
+        info_json_path_for_ctx = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
+        streamer_ctx = detect_streamer_context(
+            info_json_path_for_ctx if os.path.exists(info_json_path_for_ctx) else None
+        )
+        context_sentence = streamer_ctx.get('context_sentence', '')
+        if context_sentence:
+            print(f"[CONTEXT] {context_sentence.replace(chr(10), ' | ')}")
+
+        try:
+            print(f"Starting AI analysis with {len(segments)} segments, {len(comments)} comments...")
+            ai_clips = analyze_transcript_with_ai(
+                segments=segments,       # 全セグメント（チャンク分割は内部で処理）
+                max_clips=request.max_clips,
+                start_time=request.start_time,
+                comments=comments,
+                context=context_sentence,
+            )
+            # AI解析クリップにもコメントカウントを付加
+            if comments and ai_clips:
+                for ai_clip in ai_clips:
+                    clip_comments = [
+                        c for c in comments
+                        if ai_clip['start'] <= c.get('timestamp', -1) <= ai_clip['end']
+                    ]
+                    ai_clip['comment_count'] = len(clip_comments)
+            print(f"AI analysis returned {len(ai_clips)} clips")
+        except Exception as e:
+            print(f"AI analysis failed (non-fatal): {e}")
+            import traceback
+            traceback.print_exc()
+            ai_clips = []
+
+        # ── クリップ品質評価 ──────────────────────────────────────────────
+        print(f"Evaluating {len(clips)} hybrid clips + {len(ai_clips)} AI clips...")
+        for clip in clips + ai_clips:
             try:
                 evaluation = evaluate_clip_quality(
                     vtt_path, clip['start'], clip['end'],
@@ -1249,15 +1277,17 @@ async def analyze_video(request: AnalyzeRequest):
         # Return clips with metadata
         return {
             "clips": clips,
+            "ai_clips": ai_clips,
             "total_segments": total_segments,
-            "analyzed_segments": end_index,
-            "has_more": end_index < total_segments,
-            "next_offset": end_index if end_index < total_segments else None
+            "analyzed_segments": total_segments,  # 全セグメントを解析
+            "has_more": False,                     # ページングなし
+            "next_offset": None
         }
 
     except Exception as e:
         print(f"Error analyzing video: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 class AnalyzeStampsRequest(BaseModel):
     vtt_filename: Optional[str] = None
