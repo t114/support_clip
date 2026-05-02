@@ -212,7 +212,7 @@ def correct_transcript_segments(segments: list, batch_size: int = 30,
                     'content': prompt,
                 }],
                 format='json',
-                options={'temperature': 0.1, 'num_predict': 2000},
+                options={'temperature': 0.1, 'num_predict': 2000, 'num_ctx': 32768},
             )
 
             raw = response['message']['content'].strip()

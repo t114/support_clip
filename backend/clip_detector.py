@@ -458,7 +458,7 @@ JSON array (start with [):"""
                         {'role': 'user', 'content': prompt},
                     ],
                     format='json',
-                    options={'temperature': temp, 'num_predict': 1500},
+                    options={'temperature': temp, 'num_predict': 1500, 'num_ctx': 32768},
                 )
 
                 content = response['message']['content']
@@ -762,7 +762,7 @@ def evaluate_clip_quality(vtt_path: str, start_time: float, end_time: float, oll
                 'role': 'user',
                 'content': prompt,
             },
-        ], format='json', options={'temperature': 0.3})
+        ], format='json', options={'temperature': 0.3, 'num_ctx': 32768})
 
         # Extract content from response
         content = response['message']['content']

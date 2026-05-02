@@ -77,6 +77,7 @@ PR文章のみを出力してください。説明や前置きは不要です。
             ],
             options={
                 'temperature': 0.7, # Slightly creative
+                'num_ctx': 32768,
             }
         )
 
