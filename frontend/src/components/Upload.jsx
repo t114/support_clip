@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 export default function Upload({ onUploadStart, onUploadSuccess, onUploadError }) {
-    const [modelSize, setModelSize] = useState('base');
+    const [modelSize, setModelSize] = useState('large');
     const [maxCharsPerLine, setMaxCharsPerLine] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
 
