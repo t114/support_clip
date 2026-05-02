@@ -1,56 +1,63 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
 import shutil
 import os
 import uuid
 import requests
 import datetime
+import json
+import logging
+import re
+
+from .paths import UPLOAD_DIR, PREFIX_IMAGES_DIR, SOUNDS_DIR, EMOJIS_DIR, ensure_dirs
 from .transcribe import transcribe_video
-from .youtube_downloader import download_youtube_video, download_low_quality_for_analysis, extract_video_id
-from .clip_detector import analyze_transcript_with_ai, detect_boundaries_hybrid, extend_short_clips, evaluate_clip_quality, count_comments_in_clips, detect_kusa_emoji_clips, detect_comment_density_clips, detect_emoji_density_clips
-from .video_clipper import extract_clip, merge_clips, capture_and_process_clip
-from .config import DEFAULT_MAX_CLIPS
+from .subtitle_utils import parse_vtt_file, convert_vtt_to_srt, convert_srt_to_vtt
+from .clip_detector import evaluate_clip_quality, detect_comment_density_clips
 from .fcpxml_generator import generate_fcpxml
-from .video_processing import get_video_info
-from .description_generator import MEMBERS_FILE
+from .video_processing import get_video_info, burn_subtitles_with_ffmpeg
+from .ass_generator import generate_ass, generate_danmaku_ass
+from .progress import update_progress, get_progress, clear_progress
+from .chat_utils import extract_comments
+from .description_generator import generate_description, detect_members, get_all_members
+from .twitter_generator import generate_twitter_pr_text
+
+# Import routers
+from .api_emojis import router as emojis_router
+from .api_emojis import youtube_sync_router
+from .api_styles import router as styles_router
+from .api_youtube import router as youtube_router
+
+ensure_dirs()
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origin
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Ensure uploads directory exists
-UPLOAD_DIR = "backend/uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# Ensure prefix images directory exists
-PREFIX_IMAGES_DIR = os.path.join(UPLOAD_DIR, "prefix_images")
-os.makedirs(PREFIX_IMAGES_DIR, exist_ok=True)
-
-# Ensure sounds directory exists
-SOUNDS_DIR = "backend/assets/sounds"
-os.makedirs(SOUNDS_DIR, exist_ok=True)
 app.mount("/static/sounds", StaticFiles(directory=SOUNDS_DIR), name="sounds")
-
-# Ensure emojis directory exists
-EMOJIS_DIR = "backend/assets/emojis"
-os.makedirs(EMOJIS_DIR, exist_ok=True)
 app.mount("/static/emojis", StaticFiles(directory=EMOJIS_DIR), name="emojis")
-
-# Mount static files to serve uploaded videos and generated subtitles (Last because it's most generic)
+app.mount("/static/prefix_images", StaticFiles(directory=PREFIX_IMAGES_DIR), name="prefix_images")
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
 
-import logging
+# Register Routers
+app.include_router(emojis_router)
+app.include_router(youtube_sync_router)
+app.include_router(styles_router)
+app.include_router(youtube_router)
 
-# Setup logger
-logger = logging.getLogger(__name__)
+@app.get("/")
+async def root():
+    return {"message": "Video Transcription API is running"}
 
 @app.post("/upload")
 async def upload_video(
@@ -59,23 +66,19 @@ async def upload_video(
     max_chars_per_line: int = Form(0)
 ):
     try:
-        # Generate unique filename
         file_extension = os.path.splitext(file.filename)[1]
         if not file_extension:
-            file_extension = ".mp4" # Default to mp4 if no extension
+            file_extension = ".mp4"
 
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         file_path = os.path.join(UPLOAD_DIR, unique_filename)
 
-        # Save uploaded file
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
         logger.info(f"Video uploaded: {unique_filename}, model_size: {model_size}")
 
-        # model_size が "none" の場合は文字起こしをスキップ
         if model_size == "none":
-            logger.info(f"Skipping transcription (model_size=none) for {unique_filename}")
             return {
                 "video_url": f"/static/{unique_filename}",
                 "subtitle_url": None,
@@ -85,21 +88,10 @@ async def upload_video(
                 "unique_filename": unique_filename
             }
 
-        # Transcribe
-        # Note: In a real app, this should be a background task
         vtt_path = transcribe_video(file_path, model_size=model_size, max_chars_per_line=max_chars_per_line)
-
-        # Return URLs relative to the static mount
         srt_path = vtt_path.replace('.vtt', '.srt')
 
-        # Generate FCPXML
-        # Parse VTT to get segments for FCPXML
-        # We need to parse VTT again or have transcribe return segments.
-        # transcribe_video returns path. Let's parse it quickly or refactor.
-        # For now, let's parse the VTT file we just made.
-        from .transcribe import parse_vtt_file
         segments = parse_vtt_file(vtt_path)
-
         video_info = get_video_info(file_path)
         fcpxml_filename = f"{unique_filename}.fcpxml"
         fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
@@ -119,12 +111,6 @@ async def upload_video(
         logger.error(f"Error processing upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-from pydantic import BaseModel
-from typing import Dict, Any, Optional
-from .video_processing import burn_subtitles_with_ffmpeg
-from .ass_generator import generate_ass, generate_danmaku_ass
-import json
-
 class BurnRequest(BaseModel):
     video_filename: str
     subtitle_content: str
@@ -135,646 +121,13 @@ class BurnRequest(BaseModel):
     danmaku_density: int = 10
     sound_events: Optional[list] = None
 
-class EmojiConfigsRequest(BaseModel):
-    configs: dict # { shortcut: [category1, category2] }
-
-# In-memory cache for channel details to avoid redundant I/O
-_MEMBERS_CACHE = None
-def get_channel_info(cid, members_map=None):
-    global _MEMBERS_CACHE
-    if members_map is None:
-        if _MEMBERS_CACHE is None:
-            _MEMBERS_CACHE = {}
-            try:
-                if os.path.exists(MEMBERS_FILE):
-                    with open(MEMBERS_FILE, "r", encoding='utf-8') as f:
-                        data = json.load(f)
-                        for m in data.get("members", []):
-                            url = m.get("channel_url", "")
-                            if "/channel/" in url:
-                                c_id = url.split("/channel/")[-1]
-                                _MEMBERS_CACHE[c_id] = m.get("name_ja")
-            except Exception as e:
-                logger.warning(f"Error loading members.json for cache: {e}")
-        members_map = _MEMBERS_CACHE
-
-    name = cid
-    registered_at = None
-    
-    # 1. Check local channel_info.json (saved during sync)
-    c_dir = os.path.join(EMOJIS_DIR, cid)
-    info_path = os.path.join(c_dir, "channel_info.json")
-    if os.path.exists(info_path):
-        try:
-            with open(info_path, "r", encoding='utf-8') as f:
-                data = json.load(f)
-                name = data.get("name", cid)
-                registered_at = data.get("registered_at")
-        except: pass
-
-    # Fallback for registration date: use folder modification time
-    if not registered_at and os.path.exists(c_dir):
-        import datetime
-        mtime = os.path.getmtime(c_dir)
-        registered_at = datetime.datetime.fromtimestamp(mtime).isoformat()
-
-    if cid in members_map: 
-        name = members_map[cid]
-
-    # 2. Search info files in uploads if name is still unknown
-    if name == cid or name == "Unknown Channel":
-        import glob
-        for info_file in glob.glob(os.path.join(UPLOAD_DIR, "*.info.json")):
-            try:
-                with open(info_file, "r") as f:
-                    d = json.load(f)
-                    if d.get("channel_id") == cid:
-                        name = d.get("uploader")
-                        break
-            except: continue
-    
-    return name if name != cid else "Unknown Channel", registered_at
-
-class SyncEmojiRequest(BaseModel):
-    channel_id: str
-    channel_name: Optional[str] = None
-    emojis: Dict[str, str] # shortcut -> url
-
-def extract_text_from_runs(runs, collected_emojis=None):
-    """Helper to extract text and emoji shortcuts from YouTube message runs"""
-    text = ""
-    for run in runs:
-        if 'text' in run:
-            text += run['text']
-        elif 'emoji' in run:
-            emoji = run['emoji']
-            shortcuts = emoji.get('shortcuts', [])
-            shortcut = None
-            if shortcuts:
-                # Use the first shortcut (e.g. :_mioハトタウロス:)
-                shortcut = shortcuts[0]
-            else:
-                # Fallback to image label
-                label = emoji.get('image', {}).get('accessibility', {}).get('accessibilityData', {}).get('label', '')
-                if label:
-                    shortcut = f":{label}:"
-            
-            if shortcut:
-                text += shortcut
-                if collected_emojis is not None:
-                    thumbnails = emoji.get('image', {}).get('thumbnails', [])
-                    if thumbnails:
-                        url = thumbnails[-1].get('url')
-                        collected_emojis[shortcut] = url
-                        # logger.debug(f"Collected emoji: {shortcut} -> {url}") 
-    return text
-
-def save_emojis_to_disk(channel_id, emoji_data):
-    """Save emoji images to disk and update mapping file"""
-    if not channel_id or channel_id == "UNKNOWN_CHANNEL":
-        return
-        
-    channel_dir = os.path.join(EMOJIS_DIR, channel_id)
-    os.makedirs(channel_dir, exist_ok=True)
-    mapping_file = os.path.join(channel_dir, "map.json")
-    
-    # Load existing map
-    local_mapping = {}
-    if os.path.exists(mapping_file):
-        try:
-            with open(mapping_file, 'r', encoding='utf-8') as f:
-                local_mapping = json.load(f)
-        except: pass
-        
-    updated = False
-    logger.info(f"Saving emojis for {channel_id}. Found {len(emoji_data)} emojis to check.")
-    for shortcut, url in emoji_data.items():
-        if shortcut in local_mapping: continue
-        
-        logger.info(f"Downloading new emoji: {shortcut} from {url}")
-        
-        # Sanitize shortcut to use as filename
-        safe_name = "".join([c for c in shortcut if c.isalnum() or c in "_-"]).strip("_")
-        if not safe_name: safe_name = f"emoji_{hash(shortcut)}"
-        
-        # Identify extension from URL if possible, otherwise .png
-        ext = ".png"
-        if ".webp" in url: ext = ".webp"
-        elif ".gif" in url: ext = ".gif"
-        
-        filename = f"{safe_name}{ext}"
-        file_path = os.path.join(channel_dir, filename)
-        
-        # Download if not exists
-        if not os.path.exists(file_path):
-            try:
-                resp = requests.get(url, stream=True, timeout=10)
-                if resp.status_code == 200:
-                    with open(file_path, 'wb') as f:
-                        for chunk in resp.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                    local_mapping[shortcut] = filename
-                    updated = True
-            except Exception as e:
-                logger.warning(f"Failed to auto-download emoji {shortcut}: {e}")
-        else:
-            local_mapping[shortcut] = filename
-            updated = True
-            
-    if updated:
-        with open(mapping_file, 'w', encoding='utf-8') as f:
-            json.dump(local_mapping, f, ensure_ascii=False, indent=2)
-
-def extract_comments(base_name):
-    """Refactored helper to extract comments from json files"""
-    live_chat_file = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
-    info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
-    
-    comments_data = []
-    
-    logger.info(f"Extracting comments for {base_name}. Checking files...")
-    
-    collected_emojis = {}
-    channel_id = None
-    
-    # Try to get channel_id from info file first to know where to save emojis
-    if os.path.exists(info_file):
-        try:
-            with open(info_file, 'r', encoding='utf-8') as f:
-                info = json.load(f)
-                channel_id = info.get('channel_id')
-        except: pass
-
-    if os.path.exists(live_chat_file):
-        logger.info(f"Found live chat file: {live_chat_file}")
-        with open(live_chat_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    
-                    # Live chat replay packets often group multiple actions
-                    # Primary structure is replayChatItemAction -> actions -> [addChatItemAction, ...]
-                    actions_container = data.get('replayChatItemAction', {})
-                    actions = actions_container.get('actions', [])
-                    
-                    # Fallback for other structures
-                    if not actions and 'actions' in data:
-                        actions = data.get('actions', [])
-                    
-                    # Global offset for this packet
-                    packet_offset = actions_container.get('videoOffsetTimeMsec')
-                    if not packet_offset and 'videoOffsetTimeMsec' in data:
-                        packet_offset = data['videoOffsetTimeMsec']
-
-                    for action in actions:
-                        item_action = action.get('addChatItemAction', {})
-                        if not item_action: continue
-                        
-                        item = item_action.get('item', {})
-                        if not item: continue
-                        
-                        text = None
-                        if 'liveChatTextMessageRenderer' in item:
-                            renderer = item['liveChatTextMessageRenderer']
-                            text_runs = renderer.get('message', {}).get('runs', [])
-                            text = extract_text_from_runs(text_runs, collected_emojis)
-                        elif 'liveChatPaidMessageRenderer' in item:
-                            renderer = item['liveChatPaidMessageRenderer']
-                            text_runs = renderer.get('message', {}).get('runs', [])
-                            text = extract_text_from_runs(text_runs, collected_emojis)
-                            purchase_amount = renderer.get('purchaseAmountText', {}).get('simpleText', '')
-                            if purchase_amount:
-                                text = f"[{purchase_amount}] {text}"
-                        elif 'liveChatMembershipItemRenderer' in item:
-                            renderer = item['liveChatMembershipItemRenderer']
-                            header_runs = renderer.get('headerSubtext', {}).get('runs', [])
-                            header_text = extract_text_from_runs(header_runs, collected_emojis)
-                            msg_runs = renderer.get('message', {}).get('runs', [])
-                            msg_text = extract_text_from_runs(msg_runs, collected_emojis)
-                            text = f"{header_text} {msg_text}".strip()
-                        elif 'liveChatSponsorshipGiftRedemptionAnnouncementRenderer' in item:
-                            renderer = item['liveChatSponsorshipGiftRedemptionAnnouncementRenderer']
-                            msg_runs = renderer.get('message', {}).get('runs', [])
-                            text = extract_text_from_runs(msg_runs, collected_emojis)
-                            
-                        if text:
-                            # Use packet offset as default, override if renderer has its own (unlikely but possible)
-                            offset_str = packet_offset
-                            if 'videoOffsetTimeMsec' in item.get('liveChatTextMessageRenderer', {}):
-                                offset_str = item['liveChatTextMessageRenderer']['videoOffsetTimeMsec']
-                            
-                            if offset_str:
-                                try:
-                                    time_sec = int(offset_str) / 1000.0
-                                    comments_data.append({'text': text, 'timestamp': time_sec})
-                                except:
-                                    pass
-                except:
-                    continue
-                    
-    if not comments_data and os.path.exists(info_file):
-        logger.info(f"Checking info file for comments: {info_file}")
-        try:
-            with open(info_file, 'r', encoding='utf-8') as f:
-                info = json.load(f)
-                if 'comments' in info:
-                    logger.info(f"Found {len(info['comments'])} comments in info.json")
-                    for c in info['comments']:
-                        text = c.get('text', '')
-                        timestamp = c.get('timestamp')
-                        if timestamp is not None:
-                            comments_data.append({'text': text, 'timestamp': float(timestamp)})
-        except Exception as e:
-            logger.error(f"Error reading info.json comments: {e}")
-            
-    # Save any new emojis discovered
-    if collected_emojis and channel_id:
-        save_emojis_to_disk(channel_id, collected_emojis)
-            
-    logger.info(f"Extracted {len(comments_data)} comments total.")
-    return comments_data
-
-@app.get("/youtube/comments/{video_filename}")
-async def get_video_comments(video_filename: str):
-    """Get comments for a video for frontend preview"""
-    base_name = os.path.splitext(video_filename)[0]
-    comments = extract_comments(base_name)
-    return {"comments": comments}
-
-class CommentsRangeRequest(BaseModel):
-    video_filename: str
-    start: float
-    end: float
-
-@app.post("/youtube/comments/range")
-async def get_comments_range(request: CommentsRangeRequest):
-    """Get comments for a specific time range"""
-    try:
-        base_name = os.path.splitext(request.video_filename)[0]
-        all_comments = extract_comments(base_name)
-        
-        filtered_comments = [
-            c for c in all_comments 
-            if request.start <= c['timestamp'] <= request.end
-        ]
-        
-        return {"comments": filtered_comments}
-    except Exception as e:
-        logger.error(f"Error fetching range comments: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/youtube/sync-emojis")
-async def sync_emojis(request: SyncEmojiRequest):
-    """Download and sync membership emojis for a channel"""
-    try:
-        channel_id = request.channel_id
-        if not channel_id or channel_id == "UNKNOWN_CHANNEL":
-             raise HTTPException(status_code=400, detail="Channel ID is required")
-             
-        # Reuse existing save logic if possible, or keep this explicit
-        # We'll use the helper function logic directly here for clarity as save_emojis_to_disk is designed slightly differently
-        
-        channel_dir = os.path.join(EMOJIS_DIR, channel_id)
-        
-        # Overwrite logic: if directory exists, delete it first to ensure stale emojis are removed
-        if os.path.exists(channel_dir):
-            logger.info(f"Overwriting emojis for {channel_id}: removing existing directory")
-            shutil.rmtree(channel_dir)
-            
-        os.makedirs(channel_dir, exist_ok=True)
-        
-        saved_count = 0
-        local_mapping = {}
-        
-        # Determine mapping file path
-        mapping_file = os.path.join(channel_dir, "map.json")
-        
-        # Load existing map to merge if needed, though usually we overwrite or update
-        # This block is removed because we are explicitly overwriting the directory
-        # if os.path.exists(mapping_file):
-        #     try:
-        #         with open(mapping_file, 'r', encoding='utf-8') as f:
-        #             local_mapping = json.load(f)
-        #     except: pass
-
-        for shortcut, url in request.emojis.items():
-            # Sanitize shortcut to use as filename
-            safe_name = "".join([c for c in shortcut if c.isalnum() or c in "_-"]).strip("_")
-            if not safe_name: safe_name = f"emoji_{hash(shortcut)}"
-            
-            # Identify extension
-            ext = ".png"
-            if ".webp" in url: ext = ".webp"
-            elif ".gif" in url: ext = ".gif"
-            
-            filename = f"{safe_name}{ext}"
-            file_path = os.path.join(channel_dir, filename)
-            
-            # Update mapping
-            local_mapping[shortcut] = filename
-            
-            # Download if not exists
-            if not os.path.exists(file_path):
-                logger.info(f"Downloading emoji {shortcut} for {channel_id}")
-                try:
-                    resp = requests.get(url, stream=True, timeout=10)
-                    if resp.status_code == 200:
-                        with open(file_path, 'wb') as f:
-                            for chunk in resp.iter_content(chunk_size=8192):
-                                f.write(chunk)
-                        saved_count += 1
-                except Exception as e:
-                     logger.warning(f"Failed to download emoji {shortcut}: {e}")
-            else:
-                saved_count += 1
-                
-        # Save mapping file
-        with open(mapping_file, 'w', encoding='utf-8') as f:
-            json.dump(local_mapping, f, ensure_ascii=False, indent=2)
-
-        # Save channel name metadata if provided
-        if request.channel_name:
-            import datetime
-            info_file = os.path.join(channel_dir, "channel_info.json")
-            info_data = {"name": request.channel_name, "registered_at": datetime.datetime.now().isoformat()}
-            with open(info_file, 'w', encoding='utf-8') as f:
-                json.dump(info_data, f, ensure_ascii=False, indent=2)
-
-        refresh_channels_summary_cache()
-        return {"status": "success", "saved_count": saved_count, "channel_id": channel_id}
-    except Exception as e:
-        logger.error(f"Error syncing emojis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-def refresh_channels_summary_cache():
-    """Recalculate summary for all channels and save to cache"""
-    try:
-        channels = []
-        if not os.path.exists(EMOJIS_DIR):
-            return []
-            
-        for channel_id in os.listdir(EMOJIS_DIR):
-            channel_dir = os.path.join(EMOJIS_DIR, channel_id)
-            if not os.path.isdir(channel_dir):
-                continue
-            if channel_id in ["common_emojis.json", "summary.json"]:
-                continue
-                
-            mapping_file = os.path.join(channel_dir, "map.json")
-            name, registered_at = get_channel_info(channel_id)
-            
-            count = 0
-            examples = []
-            if os.path.exists(mapping_file):
-                try:
-                    with open(mapping_file, "r", encoding='utf-8') as f:
-                        emojis = json.load(f)
-                        count = len(emojis)
-                        examples = list(emojis.keys())[:5]
-                except: pass
-            
-            channels.append({
-                "id": channel_id,
-                "name": name,
-                "registered_at": registered_at,
-                "count": count,
-                "examples": examples
-            })
-            
-        summary = sorted(channels, key=lambda x: x['name'])
-        summary_path = os.path.join(EMOJIS_DIR, "summary.json")
-        import datetime
-        with open(summary_path, "w", encoding='utf-8') as f:
-            json.dump({"channels": summary, "updated_at": datetime.datetime.now().isoformat()}, f, ensure_ascii=False)
-        return summary
-    except Exception as e:
-        logger.error(f"Error refreshing channels summary cache: {e}")
-        return []
-
-@app.get("/api/emojis")
-async def get_emoji_list():
-    """Get list of all channels with emojis (cached)"""
-    summary_path = os.path.join(EMOJIS_DIR, "summary.json")
-    if os.path.exists(summary_path):
-        try:
-            with open(summary_path, "r", encoding='utf-8') as f:
-                data = json.load(f)
-                return {"channels": data.get("channels", [])}
-        except: pass
-    
-    channels = refresh_channels_summary_cache()
-    return {"channels": channels}
-
-def refresh_common_emojis_cache():
-    """Recalculate common emojis and save to cache"""
-    try:
-        from collections import Counter
-        all_shortcuts = []
-        if not os.path.exists(EMOJIS_DIR):
-            return []
-            
-        for channel_id in os.listdir(EMOJIS_DIR):
-            channel_dir = os.path.join(EMOJIS_DIR, channel_id)
-            if not os.path.isdir(channel_dir):
-                continue
-            mapping_file = os.path.join(channel_dir, "map.json")
-            if os.path.exists(mapping_file):
-                try:
-                    with open(mapping_file, "r", encoding='utf-8') as f:
-                        emojis = json.load(f)
-                        all_shortcuts.extend(emojis.keys())
-                except: continue
-        
-        counts = Counter(all_shortcuts)
-        common = [s for s, count in counts.items() if count >= 2]
-        
-        cache_path = os.path.join(EMOJIS_DIR, "common_emojis.json")
-        with open(cache_path, "w", encoding='utf-8') as f:
-            json.dump({"common": common, "updated_at": datetime.datetime.now().isoformat()}, f)
-        return common
-    except Exception as e:
-        logger.error(f"Error refreshing common emojis cache: {e}")
-        return []
-
-@app.get("/api/emojis/common")
-async def get_common_emojis():
-    """Get list of emoji shortcuts that appear in multiple channels (cached)"""
-    cache_path = os.path.join(EMOJIS_DIR, "common_emojis.json")
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path, "r", encoding='utf-8') as f:
-                data = json.load(f)
-                return {"common": data.get("common", [])}
-        except: pass
-    
-    # Fallback/First time
-    common = refresh_common_emojis_cache()
-    return {"common": common}
-
-@app.get("/api/emojis/export")
-async def export_emojis():
-    """Export all emojis and configurations as a ZIP file"""
-    import zipfile
-    import tempfile
-    
-    try:
-        if not os.path.exists(EMOJIS_DIR):
-            raise HTTPException(status_code=404, detail="No emojis found")
-            
-        zip_path = os.path.join(tempfile.gettempdir(), "emojis_export.zip")
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(EMOJIS_DIR):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, EMOJIS_DIR)
-                    zipf.write(file_path, arcname)
-                    
-        return FileResponse(
-            path=zip_path,
-            filename="emojis_export.zip",
-            media_type="application/zip",
-            background=None
-        )
-    except Exception as e:
-        logger.error(f"Error exporting emojis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/emojis/import")
-async def import_emojis(file: UploadFile = File(...)):
-    """Import emojis and configurations from a ZIP file"""
-    import zipfile
-    import tempfile
-    
-    try:
-        if not file.filename.endswith('.zip'):
-            raise HTTPException(status_code=400, detail="Must be a ZIP file")
-            
-        zip_path = os.path.join(tempfile.gettempdir(), "emojis_import.zip")
-        with open(zip_path, "wb") as f:
-            f.write(await file.read())
-            
-        os.makedirs(EMOJIS_DIR, exist_ok=True)
-        
-        with zipfile.ZipFile(zip_path, 'r') as zipf:
-            zipf.extractall(EMOJIS_DIR)
-            
-        refresh_common_emojis_cache()
-        refresh_channels_summary_cache()
-        
-        return {"status": "success", "message": "Emojis imported successfully"}
-    except Exception as e:
-        logger.error(f"Error importing emojis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/emojis/{channel_id}")
-async def get_emoji_details(channel_id: str):
-    """Get all emoji details for a specific channel"""
-    channel_dir = os.path.join(EMOJIS_DIR, channel_id)
-    if not os.path.exists(channel_dir):
-        raise HTTPException(status_code=404, detail="Channel not found")
-        
-    mapping_file = os.path.join(channel_dir, "map.json")
-    if not os.path.exists(mapping_file):
-        return {"id": channel_id, "emojis": []}
-        
-    try:
-        with open(mapping_file, "r", encoding='utf-8') as f:
-            emojis = json.load(f)
-            
-        # Load configs if exists
-        configs_file = os.path.join(channel_dir, "configs.json")
-        configs = {}
-        if os.path.exists(configs_file):
-            try:
-                with open(configs_file, "r", encoding='utf-8') as f:
-                    configs = json.load(f)
-            except: pass
-            
-        # Build full URLs for frontend
-        detail_list = []
-        for shortcut, filename in emojis.items():
-            detail_list.append({
-                "shortcut": shortcut,
-                "url": f"/static/emojis/{channel_id}/{filename}",
-                "categories": configs.get(shortcut, [])
-            })
-            
-        name, registered_at = get_channel_info(channel_id)
-        return {
-            "id": channel_id,
-            "name": name,
-            "registered_at": registered_at,
-            "emojis": detail_list
-        }
-    except Exception as e:
-        logger.error(f"Error reading emoji details for {channel_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/emojis/{channel_id}/configs")
-async def update_emoji_configs(channel_id: str, request: EmojiConfigsRequest):
-    """Update emoji category configurations for a channel"""
-    try:
-        channel_dir = os.path.join(EMOJIS_DIR, channel_id)
-        if not os.path.exists(channel_dir):
-            raise HTTPException(status_code=404, detail="Channel not found")
-            
-        configs_file = os.path.join(channel_dir, "configs.json")
-        with open(configs_file, "w", encoding='utf-8') as f:
-            json.dump(request.configs, f, ensure_ascii=False, indent=2)
-            
-        # Refresh caches
-        refresh_common_emojis_cache()
-        refresh_channels_summary_cache()
-        return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Error updating emoji configs for {channel_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/emojis/{channel_id}")
-async def delete_emojis(channel_id: str):
-    """Delete all emojis for a channel"""
-    try:
-        channel_dir = os.path.join(EMOJIS_DIR, channel_id)
-        if not os.path.exists(channel_dir):
-            raise HTTPException(status_code=404, detail="Channel not found")
-            
-        shutil.rmtree(channel_dir)
-        refresh_common_emojis_cache()
-        refresh_channels_summary_cache()
-        return {"status": "success", "message": f"Deleted emojis for {channel_id}"}
-    except Exception as e:
-        logger.error(f"Error deleting emojis for {channel_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/sounds")
-async def get_sounds():
-    """Get list of available sound effects"""
-    try:
-        sounds = []
-        if os.path.exists(SOUNDS_DIR):
-            for filename in os.listdir(SOUNDS_DIR):
-                if filename.lower().endswith(('.mp3', '.wav', '.ogg')):
-                    sounds.append({
-                        "name": filename,
-                        "url": f"/static/sounds/{filename}"
-                    })
-        return {"sounds": sorted(sounds, key=lambda x: x["name"])}
-    except Exception as e:
-        logger.error(f"Error listing sounds: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/burn")
 async def burn_subtitles(request: BurnRequest):
     try:
-        # Find video file
         video_path = os.path.join(UPLOAD_DIR, request.video_filename)
         if not os.path.exists(video_path):
             raise HTTPException(status_code=404, detail="Video not found")
 
-        # Clean up styles: if prefixImage is set, clear the prefix text
         cleaned_styles = dict(request.styles)
         if cleaned_styles.get('prefixImage'):
             cleaned_styles['prefix'] = ''
@@ -788,48 +141,35 @@ async def burn_subtitles(request: BurnRequest):
                     cleaned_style['prefix'] = ''
                 cleaned_saved_styles[name] = cleaned_style
 
-        # Save temporary VTT
         base_name = os.path.splitext(request.video_filename)[0]
         vtt_path = os.path.join(UPLOAD_DIR, f"{base_name}_modified.vtt")
         with open(vtt_path, "w", encoding="utf-8") as f:
             f.write(request.subtitle_content)
 
-        # Get video resolution early for ASS and Danmaku generation
-        from .video_processing import get_video_info
         v_info = get_video_info(video_path)
 
-        # Generate ASS file with styles
         ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_modified.ass")
         generate_ass(
-            vtt_path,
-            cleaned_styles,
-            ass_path,
+            vtt_path, cleaned_styles, ass_path,
             saved_styles=cleaned_saved_styles,
             style_map=request.style_map,
             video_info=v_info
         )
         
-        # Generate Danmaku ASS if requested
         danmaku_ass_path = None
         emoji_overlays = None
         if request.with_danmaku:
             comments_data = extract_comments(base_name)
 
             if comments_data:
-                # Apply density filtering
                 density = getattr(request, 'danmaku_density', 100)
                 if density < 100:
                     comments_data = [c for c in comments_data if (int(c['timestamp'] * 1000) % 100) < density]
 
                 danmaku_ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_danmaku.ass")
-                
-                # We need video resolution for danmaku generation.
-                from .video_processing import get_video_info
-                v_info = get_video_info(video_path)
                 w = v_info.get('width', 1920) or 1920
                 h = v_info.get('height', 1080) or 1080
                 
-                # Load emoji mapping for the channel
                 emoji_map = None
                 emoji_dir = None
                 info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
@@ -847,16 +187,11 @@ async def burn_subtitles(request: BurnRequest):
                     except: pass
 
                 danmaku_ass_path, emoji_overlays = generate_danmaku_ass(
-                    comments_data,
-                    danmaku_ass_path,
-                    resolution_x=w,
-                    resolution_y=h,
-                    emoji_map=emoji_map,
-                    emoji_dir=emoji_dir
+                    comments_data, danmaku_ass_path,
+                    resolution_x=w, resolution_y=h,
+                    emoji_map=emoji_map, emoji_dir=emoji_dir
                 )
 
-        # Process sound events if provided
-        # Clean sounds_events: Ensure paths are relative to SOUNDS_DIR
         processed_sounds = []
         if request.sound_events:
             for se in request.sound_events:
@@ -867,14 +202,11 @@ async def burn_subtitles(request: BurnRequest):
                         'volume': float(se.get('volume', 1.0))
                     })
 
-        # Burn subtitles (now with image prefix support and danmaku)
         output_filename = f"{base_name}_burned.mp4"
         output_path = os.path.join(UPLOAD_DIR, output_filename)
 
         burn_subtitles_with_ffmpeg(
-            video_path,
-            ass_path,
-            output_path,
+            video_path, ass_path, output_path,
             vtt_path=vtt_path,
             saved_styles=cleaned_saved_styles,
             style_map=request.style_map,
@@ -892,509 +224,156 @@ async def burn_subtitles(request: BurnRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-from fastapi.responses import FileResponse
-
 @app.get("/download/{filename}")
 async def download_video(filename: str):
     file_path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
-        
-    # Determine original filename for download
-    # We expect filename to be like "{uuid}_burned.mp4"
-    # We want the user to see "captioned_video.mp4" but we don't have the original name here easily
-    # unless we store it or pass it.
-    # For now, let's just use the filename on disk or a generic one.
-    # Actually, let's try to preserve the extension.
-    
     return FileResponse(
         path=file_path,
         filename=f"captioned_{filename}",
         media_type='application/octet-stream'
     )
 
-class YouTubeDownloadRequest(BaseModel):
-    url: str
-    with_comments: bool = False
-    model_size: str = "base"
-    analysis_mode: bool = False
-    max_chars_per_line: int = 0
-    external_transcribe_url: Optional[str] = None
-
-from .progress import update_progress, get_progress, clear_progress
-
 @app.get("/progress/{video_id}")
 async def get_video_progress(video_id: str):
     return get_progress(video_id)
 
-@app.post("/youtube/download")
-def download_youtube(request: YouTubeDownloadRequest):
-    logger.info(f"[YOUTUBE_DOWNLOAD] Endpoint called with URL: {request.url}, model_size: {request.model_size}, with_comments: {request.with_comments}, analysis_mode: {request.analysis_mode}")
+@app.get("/api/sounds")
+async def get_sounds():
     try:
-        # Extract video ID early if possible, or wait until download
-        import re
-        import time
-        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', request.url)
-        video_id = video_id_match.group(1) if video_id_match else "unknown"
-        logger.info(f"[YOUTUBE_DOWNLOAD] Extracted video ID: {video_id}")
-        
-        # Check if job is already running
-        current_progress = get_progress(video_id)
-        current_status = current_progress.get("status")
-        last_updated = current_progress.get("updated_at", 0)
-        now = time.time()
-        
-        # If active and updated recently (within 2 minutes), wait for it
-        if current_status in ["downloading", "transcribing"] and (now - last_updated) < 120:
-            logger.info(f"Job for {video_id} is already running (status: {current_status}). Waiting for completion...")
-            
-            # Wait loop
-            while True:
-                time.sleep(2)
-                prog = get_progress(video_id)
-                status = prog.get("status")
-                
-                if status == "completed":
-                    logger.info(f"Existing job for {video_id} completed. Returning result.")
-                    # Proceed to return result using cached files
-                    # We need to populate video_info and paths.
-                    # Since it's completed, files should exist.
-                    # We can just fall through to the "is_cached" logic, 
-                    # but we need to set video_info.
-                    # Let's just break and let the code proceed. 
-                    # The download_youtube_video call will see the files and return cached info.
-                    break
-                
-                if status == "error":
-                    raise HTTPException(status_code=500, detail=f"Previous job failed: {prog.get('message')}")
-                
-                # Check timeout or stale
-                if (time.time() - prog.get("updated_at", 0)) > 120:
-                    logger.warning(f"Existing job for {video_id} seems stalled. Taking over.")
-                    break
-        
-        update_progress(video_id, "downloading", 0, "動画をダウンロード中...")
-        
-        # Download video (or use cache)
-        if request.analysis_mode:
-            logger.info("Analysis mode: downloading low quality (360p)")
-            video_info = download_low_quality_for_analysis(request.url, UPLOAD_DIR)
-        else:
-            # with_commentsフラグを渡す
-            video_info = download_youtube_video(request.url, UPLOAD_DIR, download_comments=request.with_comments)
-        video_path = video_info.get("file_path")
-        real_video_id = video_info.get("id", "unknown")
-        
-        # Update video_id if we guessed wrong (though usually regex is fine)
-        if real_video_id != video_id:
-            video_id = real_video_id
-            
-        update_progress(video_id, "downloading", 100, "ダウンロード完了")
-        
-        is_cached = video_info.get("cached", False)
-        
-        # 文字起こし・FCPXMLの初期化
-        vtt_path = None
-        srt_path = None
-        fcpxml_filename = None
-        base_name = None
-
-        if video_path:
-            logger.info(f"Video downloaded/cached: {video_path}")
-            if is_cached:
-                logger.info(f"Video is cached, checking for transcription files...")
-            
-            # 文字起こしファイルのキャッシュ確認
-            # 動画IDベースのファイル名を使用
-            base_name = os.path.splitext(os.path.basename(video_path))[0]
-            vtt_filename = f"{base_name}.vtt"
-            vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
-            srt_filename = f"{base_name}.srt"
-            srt_path = os.path.join(UPLOAD_DIR, srt_filename)
-            
-            # VTTファイルが存在しない場合のみ文字起こし実行
-            # model_size が "none" の場合は文字起こしをスキップ
-            if request.model_size == "none":
-                logger.info(f"Skipping transcription (model_size=none)")
-                update_progress(video_id, "completed", 100, "文字起こしをスキップしました（字幕ファイルをアップロードしてください）")
-                # VTTとSRTのパスを空にする
-                vtt_path = None
-                srt_path = None
-            elif not os.path.exists(vtt_path):
-                logger.info(f"Transcribing video: {video_path}")
-                update_progress(video_id, "transcribing", 0, "文字起こし準備中...")
-
-                def progress_callback(percent):
-                    update_progress(video_id, "transcribing", percent, f"文字起こし中... {int(percent)}%")
-
-                vtt_path = transcribe_video(
-                    video_path, 
-                    progress_callback=progress_callback, 
-                    model_size=request.model_size,
-                    max_chars_per_line=request.max_chars_per_line,
-                    external_url=request.external_transcribe_url
-                )
-                srt_path = vtt_path.replace('.vtt', '.srt')
-
-                update_progress(video_id, "transcribing", 100, "文字起こし完了")
-            else:
-                logger.info(f"Using cached transcription: {vtt_path}")
-                update_progress(video_id, "completed", 100, "キャッシュを使用中")
-            
-            # Generate FCPXML (only if VTT exists)
-            if vtt_path:
-                from .transcribe import parse_vtt_file
-                segments = parse_vtt_file(vtt_path)
-
-                # FCPXMLのキャッシュ確認
-                fcpxml_filename = f"{base_name}.fcpxml"
-                fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
-
-                if not os.path.exists(fcpxml_path):
-                    logger.info(f"Generating FCPXML: {fcpxml_path}")
-                    video_meta = get_video_info(video_path)
-                    generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
-                else:
-                    logger.info(f"Using cached FCPXML: {fcpxml_path}")
-        else:
-            logger.info("Video is processing (live event ended just now). Metadata only mode.")
-            update_progress(video_id, "completed", 100, "アーカイブ処理待ち（OBSキャプチャが可能です）")
-        
-        update_progress(video_id, "completed", 100, "処理完了")
-
-        response_data = {
-            "video_url": f"/static/{os.path.basename(video_path)}" if video_path else None,
-            "subtitle_url": f"/static/{os.path.basename(vtt_path)}" if vtt_path else None,
-            "srt_url": f"/static/{os.path.basename(srt_path)}" if srt_path else None,
-            "fcpxml_url": f"/static/{fcpxml_filename}" if fcpxml_filename else None,
-            "filename": os.path.basename(video_path) if video_path else None,
-            "video_info": video_info,
-            "start_time": video_info.get("start_time", 0),
-            "cached": is_cached,
-            "has_comments": video_info.get("comments_file") is not None or (base_name and (os.path.exists(os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")) or os.path.exists(os.path.join(UPLOAD_DIR, f"{base_name}.info.json"))))
-        }
-
-        logger.info(f"[YOUTUBE_DOWNLOAD] Returning response for {video_id}: {response_data.keys()}")
-        logger.info(f"[YOUTUBE_DOWNLOAD] has_comments={response_data['has_comments']}, comments_file={video_info.get('comments_file')}")
-        return response_data
+        sounds = []
+        if os.path.exists(SOUNDS_DIR):
+            for filename in os.listdir(SOUNDS_DIR):
+                if filename.lower().endswith(('.mp3', '.wav', '.ogg')):
+                    sounds.append({
+                        "name": filename,
+                        "url": f"/static/sounds/{filename}"
+                    })
+        return {"sounds": sorted(sounds, key=lambda x: x["name"])}
     except Exception as e:
-        logger.error(f"Error downloading YouTube video: {e}")
-        # Try to extract video ID to update error status
-        import re
-        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', request.url)
-        if video_id_match:
-             update_progress(video_id_match.group(1), "error", 0, f"エラー: {str(e)}")
+        logger.error(f"Error listing sounds: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-class AnalyzeRequest(BaseModel):
-    vtt_filename: str
-    max_clips: int = DEFAULT_MAX_CLIPS
-    offset: int = 0  # Starting segment index
-    start_time: float = 0  # 解析開始時刻（秒）
-    ollama_host: Optional[str] = None
-    ollama_model: Optional[str] = None
-
-@app.post("/youtube/analyze")
-async def analyze_video(request: AnalyzeRequest):
+@app.post("/upload-prefix-image")
+async def upload_prefix_image(file: UploadFile = File(...)):
     try:
+        allowed_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+        file_extension = os.path.splitext(file.filename)[1].lower()
 
+        if file_extension not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}")
+
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(PREFIX_IMAGES_DIR, unique_filename)
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        image_url = f"/static/prefix_images/{unique_filename}"
+        return {"success": True, "image_url": image_url, "filename": unique_filename}
+    except Exception as e:
+        logger.error(f"Error uploading prefix image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete-prefix-image/{filename}")
+async def delete_prefix_image(filename: str):
+    try:
+        file_path = os.path.join(PREFIX_IMAGES_DIR, os.path.basename(filename))
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Image not found")
+        os.remove(file_path)
+        return {"success": True, "message": "Image deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting prefix image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/test-clip-detector")
+async def test_clip_detector():
+    from .clip_detector import analyze_transcript_with_ai
+    test_segments = [
+        {'start': 0.0, 'end': 5.0, 'text': 'テストセグメント1'},
+        {'start': 5.0, 'end': 10.0, 'text': 'テストセグメント2'},
+        {'start': 10.0, 'end': 15.0, 'text': 'テストセグメント3'},
+    ]
+    result = analyze_transcript_with_ai(test_segments, max_clips=1)
+    return {"message": "Check backend logs for debug output", "result_count": len(result), "result": result}
+
+class DescriptionRequest(BaseModel):
+    original_url: str
+    original_title: str
+    video_description: str = ""
+    clip_title: Optional[str] = None
+    upload_date: Optional[str] = None
+
+@app.post("/generate-description")
+async def generate_video_description(request: DescriptionRequest):
+    try:
+        description = generate_description(
+            original_url=request.original_url, original_title=request.original_title,
+            video_description=request.video_description, clip_title=request.clip_title,
+            upload_date=request.upload_date
+        )
+        detected_members = detect_members(request.original_title, request.video_description)
+        return {"description": description, "detected_members": detected_members}
+    except Exception as e:
+        logger.error(f"Error generating description: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class TwitterPRRequest(BaseModel):
+    original_url: str
+    original_title: str
+    video_description: str = ""
+    clip_title: Optional[str] = None
+    upload_date: Optional[str] = None
+
+@app.post("/generate-twitter-pr")
+async def generate_twitter_pr(request: TwitterPRRequest):
+    try:
+        pr_text = generate_twitter_pr_text(
+            original_url=request.original_url, original_title=request.original_title,
+            clip_title=request.clip_title, video_description=request.video_description,
+            upload_date=request.upload_date
+        )
+        return {"pr_text": pr_text}
+    except Exception as e:
+        logger.error(f"Error generating Twitter PR: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/hololive-members")
+async def get_hololive_members():
+    try:
+        members = get_all_members()
+        return {"members": members}
+    except Exception as e:
+        logger.error(f"Error getting members: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Extra YouTube routes not ported
+class EvaluateClipRequest(BaseModel):
+    vtt_filename: str
+    start: float
+    end: float
+
+@app.post("/youtube/evaluate-clip")
+async def evaluate_clip(request: EvaluateClipRequest):
+    try:
         vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
         if not os.path.exists(vtt_path):
             raise HTTPException(status_code=404, detail="Subtitle file not found")
-
-        # Parse VTT to get segments
-        # Improved parser that handles all text including numbers
-        segments = []
-        with open(vtt_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-
-        current_start = 0
-        current_end = 0
-        in_cue = False
-        text_lines = []
-        prev_line_was_empty = True
-
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-
-            if "-->" in stripped:
-                # Save previous cue if any
-                if in_cue and text_lines:
-                    segments.append({
-                        "start": current_start,
-                        "end": current_end,
-                        "text": "\n".join(text_lines).strip()
-                    })
-                    text_lines = []
-
-                times = stripped.split(" --> ")
-
-                def parse_time(t):
-                    parts = t.split(":")
-                    seconds = float(parts[-1])
-                    if len(parts) > 1:
-                        seconds += int(parts[-2]) * 60
-                    if len(parts) > 2:
-                        seconds += int(parts[-3]) * 3600
-                    return seconds
-
-                current_start = parse_time(times[0])
-                current_end = parse_time(times[1])
-                in_cue = True
-            elif stripped and in_cue and "WEBVTT" not in stripped:
-                # Skip cue numbers
-                if prev_line_was_empty and stripped.isdigit() and len(stripped) <= 6:
-                    pass
-                else:
-                    text_lines.append(stripped)
-            elif not stripped:
-                if in_cue and text_lines:
-                    segments.append({
-                        "start": current_start,
-                        "end": current_end,
-                        "text": "\n".join(text_lines).strip()
-                    })
-                    text_lines = []
-                in_cue = False
-
-            prev_line_was_empty = not stripped
-
-        # Add last segment
-        if in_cue and text_lines:
-            segments.append({
-                "start": current_start,
-                "end": current_end,
-                "text": "\n".join(text_lines).strip()
-            })
-
-        total_segments = len(segments)
-
-        # Calculate video duration from segments
-        video_duration = max([seg['end'] for seg in segments]) if segments else 0
-        print(f"Video duration: {video_duration:.1f}s, Total segments: {total_segments}")
-
-        # start_time フィルタ（指定されている場合のみ）
-        if request.start_time > 0:
-            segments = [s for s in segments if s['start'] >= request.start_time]
-            if not segments:
-                raise HTTPException(status_code=400, detail=f"No segments found after start_time={request.start_time}s")
-            print(f"Filtered to {len(segments)} segments from start_time={request.start_time}s")
-
-        # 全セグメントをそのまま使用（スペックアップに伴い制限撤廃）
-        segments_chunk = segments
-        print(f"Analyzing all {len(segments_chunk)} segments")
-
-        
-        # Find the video file from VTT filename
-        # VTT files are named the same as video files (e.g., video.mp4 -> video.vtt)
-        base_path = os.path.splitext(vtt_path)[0]
-        # Try common video extensions
-        video_path = None
-        for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
-            candidate = base_path + ext
-            if os.path.exists(candidate):
-                video_path = candidate
-                print(f"Found video file: {video_path}")
-                break
-
-        if not video_path:
-            raise HTTPException(status_code=404, detail="Video file not found")
-
-        # ── コメント読み込み（AI解析とカウント共用） ──────────────────────────
-        base_name = os.path.splitext(request.vtt_filename)[0]
-        comments = extract_comments(base_name)
-        print(f"Loaded {len(comments)} comments for analysis")
-
-        # ── ハイブリッド検出（無音＋文章区切り）─────────────────────────────
-        clips = detect_boundaries_hybrid(video_path, segments_chunk, request.max_clips, request.start_time)
-
-        # コメントカウントをクリップに付加
-        if comments:
-            live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
-            info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
-            comments_path = live_chat_path if os.path.exists(live_chat_path) else (
-                info_json_path if os.path.exists(info_json_path) else None
-            )
-            if comments_path:
-                clips = count_comments_in_clips(clips, comments_path)
-        else:
-            print(f"No comments file found for {base_name}")
-
-        # ── AI解析（字幕＋コメントを統合してOllamaで解析）──────────────────
-        from .clip_detector import analyze_transcript_with_ai
-        from .transcribe import detect_streamer_context
-
-        # 配信者コンテキスト取得（info.json と hololive_members.json を照合）
-        info_json_path_for_ctx = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
-        streamer_ctx = detect_streamer_context(
-            info_json_path_for_ctx if os.path.exists(info_json_path_for_ctx) else None
-        )
-        context_sentence = streamer_ctx.get('context_sentence', '')
-        if context_sentence:
-            print(f"[CONTEXT] {context_sentence.replace(chr(10), ' | ')}")
-
-        try:
-            print(f"Starting AI analysis with {len(segments)} segments, {len(comments)} comments...")
-            ai_clips = analyze_transcript_with_ai(
-                segments=segments,       # 全セグメント（チャンク分割は内部で処理）
-                max_clips=request.max_clips,
-                start_time=request.start_time,
-                comments=comments,
-                context=context_sentence,
-                ollama_host=request.ollama_host,
-                ollama_model=request.ollama_model
-            )
-            # AI解析クリップにもコメントカウントを付加
-            if comments and ai_clips:
-                for ai_clip in ai_clips:
-                    clip_comments = [
-                        c for c in comments
-                        if ai_clip['start'] <= c.get('timestamp', -1) <= ai_clip['end']
-                    ]
-                    ai_clip['comment_count'] = len(clip_comments)
-            print(f"AI analysis returned {len(ai_clips)} clips")
-        except Exception as e:
-            print(f"AI analysis failed (non-fatal): {e}")
-            import traceback
-            traceback.print_exc()
-            ai_clips = []
-
-        # ── クリップ品質評価 ──────────────────────────────────────────────
-        print(f"Evaluating {len(clips)} hybrid clips + {len(ai_clips)} AI clips...")
-        for clip in clips + ai_clips:
-            try:
-                evaluation = evaluate_clip_quality(
-                    vtt_path, clip['start'], clip['end'],
-                    ollama_host=request.ollama_host,
-                    ollama_model=request.ollama_model
-                )
-                clip['evaluation_score'] = evaluation['score']
-                clip['evaluation_reason'] = evaluation['reason']
-                print(f"Evaluated clip {clip['start']:.1f}-{clip['end']:.1f}: {evaluation['score']}/5 - {evaluation['reason']}")
-            except Exception as e:
-                print(f"Failed to evaluate clip {clip['start']:.1f}-{clip['end']:.1f}: {e}")
-                clip['evaluation_score'] = 3
-                clip['evaluation_reason'] = "評価に失敗しました"
-
-        # Return clips with metadata
-        return {
-            "clips": clips,
-            "ai_clips": ai_clips,
-            "total_segments": total_segments,
-            "analyzed_segments": total_segments,  # 全セグメントを解析
-            "has_more": False,                     # ページングなし
-            "next_offset": None
-        }
-
+        return evaluate_clip_quality(vtt_path, request.start, request.end)
     except Exception as e:
-        print(f"Error analyzing video: {e}")
+        logger.error(f"Error evaluating clip: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-class AnalyzeStampsRequest(BaseModel):
-    vtt_filename: Optional[str] = None
-    video_filename: Optional[str] = None
-    category: Optional[str] = "kusa" # "kusa", "kawaii", or None
-    custom_patterns: Optional[list] = None
-    clip_duration: int = 60
-    start_time: float = 0
 
 class TopStampsRequest(BaseModel):
     vtt_filename: Optional[str] = None
     video_filename: Optional[str] = None
 
-@app.post("/youtube/analyze-stamps")
-async def analyze_stamps_clips(request: AnalyzeStampsRequest):
-    """
-    Analyze video for specific emoji/category frequency in live chat.
-    Utilizes channel configurations for better accuracy.
-    """
-    try:
-        base_name = None
-        video_path = None
-        
-        if request.vtt_filename:
-            vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
-            base_name = os.path.splitext(request.vtt_filename)[0]
-        elif request.video_filename:
-            video_path = os.path.join(UPLOAD_DIR, request.video_filename)
-            base_name = os.path.splitext(request.video_filename)[0]
-        else:
-            raise HTTPException(status_code=400, detail="Either vtt_filename or video_filename must be provided")
-
-        if not video_path:
-            for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
-                candidate = os.path.join(UPLOAD_DIR, base_name + ext)
-                if os.path.exists(candidate):
-                    video_path = candidate
-                    break
-
-        if not video_path or not os.path.exists(video_path):
-            raise HTTPException(status_code=404, detail="Video file not found")
-
-        video_info = get_video_info(video_path)
-        video_duration = video_info['duration']
-
-        # Find comments file
-        live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
-        info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
-
-        comments_path = None
-        if os.path.exists(live_chat_path):
-            comments_path = live_chat_path
-        elif os.path.exists(info_json_path):
-            comments_path = info_json_path
-        else:
-            raise HTTPException(status_code=404, detail="コメントファイルが見つかりません。")
-
-        # Load channel configs to get custom stamps for this category
-        custom_patterns = []
-        if request.custom_patterns:
-            custom_patterns.extend(request.custom_patterns)
-            
-        if request.category:
-            try:
-                # We need to find the channel_id for this video
-                if os.path.exists(info_json_path):
-                    with open(info_json_path, 'r', encoding='utf-8') as f:
-                        v_data = json.load(f)
-                        channel_id = v_data.get('channel_id')
-                        if channel_id:
-                            configs_file = os.path.join(EMOJIS_DIR, channel_id, "configs.json")
-                            if os.path.exists(configs_file):
-                                with open(configs_file, "r", encoding='utf-8') as f:
-                                    c_data = json.load(f)
-                                    # Filter shortcuts that have this category
-                                    for shortcut, categories in c_data.items():
-                                        if request.category in categories and shortcut not in custom_patterns:
-                                            custom_patterns.append(shortcut)
-            except: pass
-
-        # Detect clips
-        clips = detect_emoji_density_clips(
-            comments_path=comments_path,
-            video_duration=video_duration,
-            category=request.category,
-            custom_patterns=custom_patterns,
-            clip_duration=request.clip_duration,
-            start_time=request.start_time
-        )
-
-        return {
-            "clips": clips,
-            "total_clips": len(clips),
-            "message": f"{request.category if request.category else 'スタンプ'}盛り上がり上位{len(clips)}件を検出しました"
-        }
-
-    except HTTPException: raise
-    except Exception as e:
-        logger.error(f"Error in analyze_stamps_clips: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/youtube/top-stamps")
 async def get_top_stamps(request: TopStampsRequest):
-    """Analyze comments to find the most used emojis in this specific stream"""
     try:
+        from collections import Counter
         base_name = None
         if request.vtt_filename:
             base_name = os.path.splitext(request.vtt_filename)[0]
@@ -1406,19 +385,13 @@ async def get_top_stamps(request: TopStampsRequest):
         live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
         info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
 
-        comments_path = None
-        if os.path.exists(live_chat_path):
-            comments_path = live_chat_path
-        elif os.path.exists(info_json_path):
-            comments_path = info_json_path
-        else:
+        comments_path = live_chat_path if os.path.exists(live_chat_path) else (
+            info_json_path if os.path.exists(info_json_path) else None
+        )
+        if not comments_path:
             raise HTTPException(status_code=404, detail="コメントファイルが見つかりません。")
 
-        from collections import Counter
-        import re
         stamp_counts = Counter()
-        
-        # Regex to find shortcuts like :shortcut:
         
         if comments_path.endswith('.live_chat.json'):
             with open(comments_path, 'r', encoding='utf-8') as f:
@@ -1440,24 +413,19 @@ async def get_top_stamps(request: TopStampsRequest):
                                             if scs:
                                                 stamp_counts[scs[0]] += 1
                                         elif 'text' in run:
-                                            text = run['text']
-                                            text_stamps = re.findall(r':[a-zA-Z0-9_-]+:', text)
+                                            text_stamps = re.findall(r':[a-zA-Z0-9_-]+:', run['text'])
                                             for ts in text_stamps:
                                                 stamp_counts[ts] += 1
                     except: continue
         else:
-            # info.json fallback
             with open(comments_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             for c in data.get('comments', []):
-                text = c.get('text', '')
-                text_stamps = re.findall(r':[a-zA-Z0-9_-]+:', text)
+                text_stamps = re.findall(r':[a-zA-Z0-9_-]+:', c.get('text', ''))
                 for ts in text_stamps:
                     stamp_counts[ts] += 1
 
-        # Get top 20
         top_stamps = [{"shortcut": s, "count": c} for s, c in stamp_counts.most_common(20)]
-        
         return {"top_stamps": top_stamps}
     except Exception as e:
         logger.error(f"Error in get_top_stamps: {e}")
@@ -1471,7 +439,7 @@ class AnalyzeKusaRequest(BaseModel):
 
 @app.post("/youtube/analyze-kusa")
 async def analyze_kusa_clips(request: AnalyzeKusaRequest):
-    """Legacy wrapper for kusa analysis"""
+    from .api_youtube import analyze_stamps_clips, AnalyzeStampsRequest
     return await analyze_stamps_clips(AnalyzeStampsRequest(
         vtt_filename=request.vtt_filename,
         video_filename=request.video_filename,
@@ -1483,20 +451,14 @@ async def analyze_kusa_clips(request: AnalyzeKusaRequest):
 class AnalyzeCommentDensityRequest(BaseModel):
     vtt_filename: Optional[str] = None
     video_filename: Optional[str] = None
-    clip_duration: int = 60  # 1-minute clips by default
+    clip_duration: int = 60
     start_time: float = 0
 
 @app.post("/youtube/analyze-comment-density")
 async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
-    """
-    Analyze video for comment density (total comments per minute).
-    Returns top 10 clips with highest comment count.
-    """
     try:
         base_name = None
         video_path = None
-        
-        # Determine base name and video path
         if request.vtt_filename:
             vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
             base_name = os.path.splitext(request.vtt_filename)[0]
@@ -1506,7 +468,6 @@ async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
         else:
             raise HTTPException(status_code=400, detail="Either vtt_filename or video_filename must be provided")
 
-        # Find video file if not already found
         if not video_path:
             for ext in ['.mp4', '.webm', '.mkv', '.avi', '.mov']:
                 candidate = os.path.join(UPLOAD_DIR, base_name + ext)
@@ -1517,28 +478,18 @@ async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
         if not video_path or not os.path.exists(video_path):
             raise HTTPException(status_code=404, detail="Video file not found")
 
-        # Get video duration
         video_info = get_video_info(video_path)
         video_duration = video_info['duration']
 
-        # Find comments file
         live_chat_path = os.path.join(UPLOAD_DIR, f"{base_name}.live_chat.json")
         info_json_path = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
 
-        comments_path = None
-        if os.path.exists(live_chat_path):
-            comments_path = live_chat_path
-            print(f"Found live chat file: {comments_path}")
-        elif os.path.exists(info_json_path):
-            comments_path = info_json_path
-            print(f"Found info.json file: {comments_path}")
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail="コメントファイルが見つかりません。動画ダウンロード時にコメント取得を有効にしてください。"
-            )
+        comments_path = live_chat_path if os.path.exists(live_chat_path) else (
+            info_json_path if os.path.exists(info_json_path) else None
+        )
+        if not comments_path:
+            raise HTTPException(status_code=404, detail="コメントファイルが見つかりません。")
 
-        # Detect comment density clips
         clips = detect_comment_density_clips(
             comments_path=comments_path,
             video_duration=video_duration,
@@ -1547,23 +498,11 @@ async def analyze_comment_density_clips(request: AnalyzeCommentDensityRequest):
         )
 
         if not clips:
-            return {
-                "clips": [],
-                "message": "コメントを含むクリップが見つかりませんでした"
-            }
+            return {"clips": [], "message": "コメントを含むクリップが見つかりませんでした"}
 
-        return {
-            "clips": clips,
-            "total_clips": len(clips),
-            "message": f"コメント量が多い上位{len(clips)}件のクリップを検出しました"
-        }
-
-    except HTTPException:
-        raise
+        return {"clips": clips, "total_clips": len(clips), "message": f"コメント量が多い上位{len(clips)}件のクリップを検出しました"}
     except Exception as e:
-        print(f"Error analyzing comment density: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error analyzing comment density: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/youtube/upload-subtitle")
@@ -1571,77 +510,44 @@ async def upload_subtitle(
     video_filename: str = Form(...),
     file: UploadFile = File(...)
 ):
-    """
-    Upload subtitle file (VTT or SRT) for a downloaded YouTube video
-    and generate associated files (SRT/VTT conversion and FCPXML)
-    """
     try:
-        logger.info(f"Uploading subtitle for video: {video_filename}, file: {file.filename}")
-
-        # Verify video exists
         video_path = os.path.join(UPLOAD_DIR, video_filename)
         if not os.path.exists(video_path):
-            logger.error(f"Video file not found: {video_path}")
             raise HTTPException(status_code=404, detail="Video file not found")
 
-        # Check file extension
         file_extension = os.path.splitext(file.filename)[1].lower()
-        logger.info(f"File extension: {file_extension}")
-
         if file_extension not in ['.vtt', '.srt']:
             raise HTTPException(status_code=400, detail="Only VTT or SRT files are supported")
 
-        # Save uploaded subtitle file
         base_name = os.path.splitext(video_filename)[0]
-        logger.info(f"Base name: {base_name}")
 
-        # Determine paths
         if file_extension == '.vtt':
             vtt_filename = f"{base_name}.vtt"
             vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
             srt_filename = f"{base_name}.srt"
             srt_path = os.path.join(UPLOAD_DIR, srt_filename)
 
-            logger.info(f"Saving VTT file to: {vtt_path}")
-            # Save VTT file
             with open(vtt_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
-            logger.info(f"Converting VTT to SRT: {srt_path}")
-            # Convert VTT to SRT
-            from .transcribe import convert_vtt_to_srt
             convert_vtt_to_srt(vtt_path, srt_path)
-
-        else:  # .srt
+        else:
             srt_filename = f"{base_name}.srt"
             srt_path = os.path.join(UPLOAD_DIR, srt_filename)
             vtt_filename = f"{base_name}.vtt"
             vtt_path = os.path.join(UPLOAD_DIR, vtt_filename)
 
-            logger.info(f"Saving SRT file to: {srt_path}")
-            # Save SRT file
             with open(srt_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
-            logger.info(f"Converting SRT to VTT: {vtt_path}")
-            # Convert SRT to VTT
-            from .transcribe import convert_srt_to_vtt
             convert_srt_to_vtt(srt_path, vtt_path)
 
-        logger.info(f"Parsing VTT file: {vtt_path}")
-        # Generate FCPXML
-        from .transcribe import parse_vtt_file
         segments = parse_vtt_file(vtt_path)
-        logger.info(f"Parsed {len(segments)} segments")
-
         fcpxml_filename = f"{base_name}.fcpxml"
         fcpxml_path = os.path.join(UPLOAD_DIR, fcpxml_filename)
 
-        logger.info(f"Generating FCPXML: {fcpxml_path}")
         video_meta = get_video_info(video_path)
         generate_fcpxml(segments, fcpxml_path, video_path, fps=video_meta['fps'], duration_seconds=video_meta['duration'])
-
-        logger.info(f"Subtitle uploaded and processed successfully: {vtt_filename}")
 
         return {
             "subtitle_url": f"/static/{vtt_filename}",
@@ -1649,550 +555,6 @@ async def upload_subtitle(
             "fcpxml_url": f"/static/{fcpxml_filename}",
             "message": "字幕ファイルがアップロードされました"
         }
-
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error uploading subtitle: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-class ClipRequest(BaseModel):
-    video_filename: Optional[str] = None
-    url: Optional[str] = None
-    start: float
-    end: float
-    title: str
-    crop_x: Optional[float] = None
-    crop_y: Optional[float] = None
-    crop_width: Optional[float] = None
-    crop_height: Optional[float] = None
-    crop2_x: Optional[float] = None
-    crop2_y: Optional[float] = None
-    crop2_width: Optional[float] = None
-    crop2_height: Optional[float] = None
-    split_ratio: Optional[float] = 0.5
-    use_obs_capture: bool = False
-    with_danmaku: bool = False
-    danmaku_density: int = 10
-    aspect_ratio: Optional[str] = None
-    letterbox_align: Optional[Any] = 50
-    sound_events: Optional[list] = None
-    # Subtitle burning support for clips
-    subtitle_content: Optional[str] = None
-    styles: Optional[dict] = None
-    saved_styles: Optional[dict] = None
-    style_map: Optional[dict] = None
-
-@app.post("/youtube/create-clip")
-async def create_clip(request: ClipRequest):
-    try:
-        logger.info(f"Create clip request: {request.dict()}")
-        video_path = os.path.join(UPLOAD_DIR, request.video_filename) if request.video_filename else None
-        
-        # If OBS capture is requested, we might not have a local video file yet (e.g. archive processing)
-        if not request.use_obs_capture:
-            if not video_path or not os.path.exists(video_path):
-                raise HTTPException(status_code=404, detail="Video not found and direct extraction requested")
-        elif not video_path or not os.path.exists(video_path):
-            if not request.url:
-                 raise HTTPException(status_code=404, detail="Video not found and no YouTube URL provided for OBS capture")
-            logger.info(f"Local video not found, but OBS capture requested for URL: {request.url}")
-
-        base_name = os.path.splitext(request.video_filename)[0] if request.video_filename else (extract_video_id(request.url) if request.url else "clip")
-        safe_title = "".join([c for c in request.title if c.isalnum() or c in (' ', '-', '_')]).strip()
-        output_filename = f"{base_name}_clip_{safe_title}.mp4"
-        output_path = os.path.join(UPLOAD_DIR, output_filename)
-
-        # Initialize base resolution for overlays and cropping
-        analysis_w = 1920
-        analysis_h = 1080
-        if video_path and os.path.exists(video_path):
-            from .video_processing import get_video_info
-            v_info_analysis = get_video_info(video_path)
-            analysis_w = v_info_analysis.get('width', 1920) or 1920
-            analysis_h = v_info_analysis.get('height', 1080) or 1080
-
-        # Calculate scaling for OBS capture if needed
-        scale_x = 1.0
-        scale_y = 1.0
-        if request.use_obs_capture and analysis_w < 1920:
-            scale_x = 1920 / analysis_w
-            scale_y = 1080 / analysis_h
-            logger.info(f"Scaling crop coordinates for OBS capture: {scale_x}x")
-
-        crop_params = None
-        if request.crop_width is not None and request.crop_height is not None:
-            crop_params = {
-                'x': (request.crop_x or 0) * scale_x,
-                'y': (request.crop_y or 0) * scale_y,
-                'width': request.crop_width * scale_x,
-                'height': request.crop_height * scale_y
-            }
-
-        secondary_crop_params = None
-        if request.crop2_width is not None and request.crop2_height is not None:
-            secondary_crop_params = {
-                'x': (request.crop2_x or 0) * scale_x,
-                'y': (request.crop2_y or 0) * scale_y,
-                'width': request.crop2_width * scale_x,
-                'height': request.crop2_height * scale_y
-            }
-
-        danmaku_ass_path = None
-        emoji_overlays = None
-        if request.with_danmaku:
-            # Extract and filter comments for this clip range
-            all_comments = extract_comments(base_name)
-            clip_comments = []
-            density = request.danmaku_density
-            for c in all_comments:
-                if request.start <= c['timestamp'] <= request.end:
-                    if (int(c['timestamp'] * 1000) % 100) < density:
-                        clip_comments.append({
-                            'text': c['text'],
-                            'timestamp': c['timestamp'] - request.start
-                        })
-            
-            if clip_comments:
-                danmaku_ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_clip_{safe_title}_danmaku.ass")
-                
-                # Detect the intended final resolution for overlays
-                if request.use_obs_capture:
-                    # OBS capture is 1080p (1920x1080)
-                    output_w, output_h = 1920, 1080
-                else:
-                    output_w = analysis_w
-                    output_h = analysis_h
-
-                # Adjust for cropping or aspect ratio changes if they will be applied before overlays
-                # In extract_clip, the order is: Crop -> 9:16 Pad -> Danmaku
-                if request.aspect_ratio in ['9:16', 'stacked']:
-                    # Result of extract_clip with these modes is 720x1280
-                    w, h = 720, 1280
-                elif crop_params and crop_params['width'] and crop_params['height']:
-                    # Result of cropping (use scaled params)
-                    w, h = int(crop_params['width']), int(crop_params['height'])
-                else:
-                    w, h = output_w, output_h
-
-                
-                # Load emoji mapping for the channel
-                emoji_map = None
-                emoji_dir = None
-                info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
-                if os.path.exists(info_file):
-                    try:
-                        with open(info_file, 'r', encoding='utf-8') as f_i:
-                            v_info_json = json.load(f_i)
-                            channel_id = v_info_json.get('channel_id')
-                            if channel_id:
-                                emoji_dir = os.path.join(EMOJIS_DIR, channel_id)
-                                map_path = os.path.join(emoji_dir, "map.json")
-                                if os.path.exists(map_path):
-                                    with open(map_path, 'r', encoding='utf-8') as f_m:
-                                        emoji_map = json.load(f_m)
-                    except: pass
-
-                danmaku_ass_path, emoji_overlays = generate_danmaku_ass(
-                    clip_comments,
-                    danmaku_ass_path,
-                    resolution_x=w,
-                    resolution_y=h,
-                    emoji_map=emoji_map,
-                    emoji_dir=emoji_dir
-                )
-
-        # Generate regular subtitles ASS if requested
-        ass_path = None
-        if request.subtitle_content and request.styles:
-            ass_path = os.path.join(UPLOAD_DIR, f"{base_name}_clip_{safe_title}_subs.ass")
-            
-            # Use same resolution logic as danmaku
-            if request.use_obs_capture:
-                # OBS capture is 1080p (1920x1080)
-                output_w, output_h = 1920, 1080
-            else:
-                output_w = analysis_w
-                output_h = analysis_h
-
-            if request.aspect_ratio in ['9:16', 'stacked']:
-                w, h = 720, 1280
-            elif crop_params and crop_params['width'] and crop_params['height']:
-                w, h = int(crop_params['width']), int(crop_params['height'])
-            else:
-                w, h = output_w, output_h
-            
-            # Temporary VTT for this clip
-            temp_vtt = ass_path + ".vtt"
-            with open(temp_vtt, "w", encoding="utf-8") as f_v:
-                f_v.write(request.subtitle_content)
-            
-            generate_ass(
-                temp_vtt,
-                request.styles,
-                ass_path,
-                saved_styles=request.saved_styles,
-                style_map=request.style_map,
-                video_info={"width": w, "height": h}
-            )
-            # Cleanup temp vtt
-            try: os.remove(temp_vtt)
-            except: pass
-
-        # Process sound events if provided
-        processed_sounds = []
-        if request.sound_events:
-            for se in request.sound_events:
-                if se.get('name'):
-                    processed_sounds.append({
-                        'path': os.path.join(SOUNDS_DIR, se['name']),
-                        'time': float(se.get('time', 0))
-                    })
-
-        if request.use_obs_capture:
-            url = request.url
-            if not url:
-                # Needs URL from info.json
-                info_file = os.path.join(UPLOAD_DIR, f"{base_name}.info.json")
-                if os.path.exists(info_file):
-                     try:
-                         with open(info_file, 'r') as f:
-                              info = json.load(f)
-                              url = info.get('webpage_url') or info.get('original_url')
-                              if not url and info.get('id'):
-                                   url = f"https://www.youtube.com/watch?v={info.get('id')}"
-                     except: pass
-
-            if url:
-                 print(f"Using OBS Capture for clip from {url}")
-                 try:
-                     output_path = capture_and_process_clip(
-                          url,
-                          request.start,
-                          request.end,
-                          output_path,
-                          crop_params=crop_params,
-                          secondary_crop_params=secondary_crop_params,
-                          split_ratio=request.split_ratio,
-                          ass_path=ass_path,
-                          danmaku_ass_path=danmaku_ass_path,
-                          aspect_ratio=request.aspect_ratio,
-                          letterbox_align=request.letterbox_align,
-                          emoji_overlays=emoji_overlays,
-                          sound_events=processed_sounds
-                     )
-                     return {
-                         "video_url": f"/static/{output_filename}",
-                         "filename": output_filename
-                     }
-                 except (ConnectionRefusedError, OSError) as obs_err:
-                     logger.error(f"OBS connection failed: {obs_err}")
-                     raise HTTPException(
-                         status_code=503,
-                         detail="OBSに接続できませんでした。OBS Studioを起動し、WebSocketサーバー（ポート4455）が有効になっているか確認してください。"
-                     )
-                 except Exception as obs_err:
-                     err_msg = str(obs_err)
-                     if "Connection refused" in err_msg or "111" in err_msg or "websocket" in err_msg.lower():
-                         logger.error(f"OBS capture failed: {obs_err}")
-                         raise HTTPException(
-                             status_code=503,
-                             detail="OBSに接続できませんでした。OBS Studioを起動し、WebSocketサーバー（ポート4455）が有効になっているか確認してください。"
-                         )
-                     raise
-            else:
-                 raise HTTPException(
-                     status_code=400,
-                     detail="OBSキャプチャが要求されましたが、YouTube URLが見つかりませんでした。"
-                 )
-
-        output_path = extract_clip(
-            video_path, 
-            request.start, 
-            request.end, 
-            output_path, 
-            crop_params=crop_params, 
-            secondary_crop_params=secondary_crop_params,
-            split_ratio=request.split_ratio,
-            ass_path=ass_path,
-            danmaku_ass_path=danmaku_ass_path, 
-            aspect_ratio=request.aspect_ratio,
-            letterbox_align=request.letterbox_align,
-            emoji_overlays=emoji_overlays if 'emoji_overlays' in locals() else None,
-            sound_events=processed_sounds
-        )
-
-        return {
-            "video_url": f"/static/{output_filename}",
-            "filename": output_filename
-        }
-
-    except Exception as e:
-        print(f"Error creating clip: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-class EvaluateClipRequest(BaseModel):
-    vtt_filename: str
-    start: float
-    end: float
-
-@app.post("/youtube/evaluate-clip")
-async def evaluate_clip(request: EvaluateClipRequest):
-    try:
-        vtt_path = os.path.join(UPLOAD_DIR, request.vtt_filename)
-        if not os.path.exists(vtt_path):
-            raise HTTPException(status_code=404, detail="Subtitle file not found")
-
-        evaluation = evaluate_clip_quality(vtt_path, request.start, request.end)
-
-        return evaluation
-
-    except Exception as e:
-        print(f"Error evaluating clip: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-class ExportStylesRequest(BaseModel):
-    styles: dict
-    defaultStyleName: str = None
-    recentStyleNames: list = None
-
-@app.post("/api/styles/export")
-async def export_styles(request: ExportStylesRequest):
-    """Export styles and their prefix images as a ZIP file"""
-    import zipfile
-    import tempfile
-    import json
-    
-    try:
-        temp_dir = tempfile.mkdtemp()
-        
-        # Write styles.json
-        styles_path = os.path.join(temp_dir, "styles.json")
-        with open(styles_path, "w", encoding="utf-8") as f:
-            json.dump({
-                "styles": request.styles,
-                "defaultStyleName": request.defaultStyleName,
-                "recentStyleNames": request.recentStyleNames
-            }, f, indent=2, ensure_ascii=False)
-            
-        zip_path = os.path.join(tempfile.gettempdir(), "styles_export.zip")
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # write styles.json
-            zipf.write(styles_path, "styles.json")
-            
-            # loop over prefix images
-            if os.path.exists(PREFIX_IMAGES_DIR):
-                for file in os.listdir(PREFIX_IMAGES_DIR):
-                    file_path = os.path.join(PREFIX_IMAGES_DIR, file)
-                    if os.path.isfile(file_path):
-                        zipf.write(file_path, os.path.join("prefix_images", file))
-                        
-        return FileResponse(
-            path=zip_path,
-            filename="styles_export.zip",
-            media_type="application/zip",
-            background=None
-        )
-    except Exception as e:
-        logger.error(f"Error exporting styles: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/styles/import")
-async def import_styles(file: UploadFile = File(...)):
-    """Import styles and prefix images from a ZIP file"""
-    import zipfile
-    import tempfile
-    import json
-    import shutil
-    
-    try:
-        if not file.filename.endswith('.zip'):
-            raise HTTPException(status_code=400, detail="Must be a ZIP file")
-            
-        zip_path = os.path.join(tempfile.gettempdir(), "styles_import.zip")
-        with open(zip_path, "wb") as f:
-            f.write(await file.read())
-            
-        temp_dir = tempfile.mkdtemp()
-        with zipfile.ZipFile(zip_path, 'r') as zipf:
-            zipf.extractall(temp_dir)
-            
-        # find prefix_images
-        extracted_prefix = os.path.join(temp_dir, "prefix_images")
-        if os.path.exists(extracted_prefix):
-            os.makedirs(PREFIX_IMAGES_DIR, exist_ok=True)
-            for item in os.listdir(extracted_prefix):
-                src = os.path.join(extracted_prefix, item)
-                dst = os.path.join(PREFIX_IMAGES_DIR, item)
-                shutil.copy2(src, dst)
-                
-        # read styles.json
-        styles_file = os.path.join(temp_dir, "styles.json")
-        styles_data = {}
-        if os.path.exists(styles_file):
-            with open(styles_file, "r", encoding="utf-8") as f:
-                styles_data = json.load(f)
-                
-        return {"status": "success", "data": styles_data}
-    except Exception as e:
-        logger.error(f"Error importing styles: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/")
-async def root():
-    return {"message": "Video Transcription API is running"}
-
-@app.post("/upload-prefix-image")
-async def upload_prefix_image(file: UploadFile = File(...)):
-    """Upload a prefix image for subtitle styles"""
-    try:
-        # Validate file type
-        allowed_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
-        file_extension = os.path.splitext(file.filename)[1].lower()
-
-        if file_extension not in allowed_extensions:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
-            )
-
-        # Generate unique filename
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
-        file_path = os.path.join(PREFIX_IMAGES_DIR, unique_filename)
-
-        # Save uploaded file
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        # Return URL relative to the static mount
-        image_url = f"/static/prefix_images/{unique_filename}"
-        
-        return {
-            "success": True,
-            "image_url": image_url,
-            "filename": unique_filename
-        }
-
-    except Exception as e:
-        logger.error(f"Error uploading prefix image: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/delete-prefix-image/{filename}")
-async def delete_prefix_image(filename: str):
-    """Delete a prefix image"""
-    try:
-        # Security: Only allow deletion from prefix_images directory
-        file_path = os.path.join(PREFIX_IMAGES_DIR, os.path.basename(filename))
-
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Image not found")
-
-        os.remove(file_path)
-
-        return {"success": True, "message": "Image deleted"}
-
-    except Exception as e:
-        logger.error(f"Error deleting prefix image: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/test-clip-detector")
-async def test_clip_detector():
-    """Test endpoint to verify clip_detector module is loaded correctly"""
-    print("=== TEST ENDPOINT CALLED ===")
-    import sys
-    import importlib
-
-    # Force reload the module
-    if 'backend.clip_detector' in sys.modules:
-        print("Reloading backend.clip_detector module")
-        importlib.reload(sys.modules['backend.clip_detector'])
-
-    from .clip_detector import analyze_transcript_with_ai
-
-    # Test with minimal data
-    test_segments = [
-        {'start': 0.0, 'end': 5.0, 'text': 'テストセグメント1'},
-        {'start': 5.0, 'end': 10.0, 'text': 'テストセグメント2'},
-        {'start': 10.0, 'end': 15.0, 'text': 'テストセグメント3'},
-    ]
-
-    print(f"Calling analyze_transcript_with_ai with {len(test_segments)} test segments")
-    result = analyze_transcript_with_ai(test_segments, max_clips=1)
-    print(f"Result: {len(result)} clips returned")
-
-    return {
-        "message": "Check backend logs for debug output",
-        "result_count": len(result),
-        "result": result
-    }
-
-from .description_generator import generate_description, detect_members, get_all_members
-from .twitter_generator import generate_twitter_pr_text
-
-class DescriptionRequest(BaseModel):
-    original_url: str
-    original_title: str
-    video_description: str = ""
-    clip_title: Optional[str] = None
-    upload_date: Optional[str] = None
-
-@app.post("/generate-description")
-async def generate_video_description(request: DescriptionRequest):
-    """Generate YouTube description for Hololive clip"""
-    try:
-        description = generate_description(
-            original_url=request.original_url,
-            original_title=request.original_title,
-            video_description=request.video_description,
-            clip_title=request.clip_title,
-            upload_date=request.upload_date
-        )
-
-        # Also detect members for frontend display
-        detected_members = detect_members(
-            request.original_title,
-            request.video_description
-        )
-
-        return {
-            "description": description,
-            "detected_members": detected_members
-        }
-    except Exception as e:
-        logger.error(f"Error generating description: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-class TwitterPRRequest(BaseModel):
-    original_url: str
-    original_title: str
-    video_description: str = ""
-    clip_title: Optional[str] = None
-    upload_date: Optional[str] = None
-
-@app.post("/generate-twitter-pr")
-async def generate_twitter_pr(request: TwitterPRRequest):
-    """Generate Twitter PR text for Hololive clip"""
-    try:
-        pr_text = generate_twitter_pr_text(
-            original_url=request.original_url,
-            original_title=request.original_title,
-            clip_title=request.clip_title,
-            video_description=request.video_description,
-            upload_date=request.upload_date
-        )
-
-        return {"pr_text": pr_text}
-    except Exception as e:
-        logger.error(f"Error generating Twitter PR: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/hololive-members")
-async def get_hololive_members():
-    """Get list of all Hololive members"""
-    try:
-        members = get_all_members()
-        return {"members": members}
-    except Exception as e:
-        logger.error(f"Error getting members: {e}")
         raise HTTPException(status_code=500, detail=str(e))
